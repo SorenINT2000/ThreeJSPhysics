@@ -16,22 +16,30 @@ export class NetworkManager {
     private isReady: boolean = false;
     private lastSyncTime: number = 0;
 
+    // Visual tracking
+    private remoteVisuals: Map<string, THREE.Mesh> = new Map();
+    private scene: THREE.Scene | null = null;
+    private remoteMaterial = new THREE.MeshStandardMaterial({ color: 0x4444ff });
+    private remoteGeometry = new THREE.BoxGeometry(1, 1, 1);
+
     constructor() {
         this.init();
+    }
+
+    public setScene(scene: THREE.Scene) {
+        this.scene = scene;
     }
 
     private async init() {
         console.log("[Network] Initializing PlayroomKit...");
         try {
             await insertCoin({ 
-                // streamMode: true,
                 skipLobby: true
             });
             
             const me = myPlayer();
             this.localId = me?.id || "";
             
-            // 1. Initial Broadcast: Make sure we aren't "silent"
             me.setState("pos", { x: 0, y: 5, z: 0 }, true);
             me.setState("rot", 0, true);
             
@@ -40,15 +48,9 @@ export class NetworkManager {
             const roomCode = getRoomCode();
             console.log(`[Network] Connected! ID: ${this.localId}, Room: ${roomCode}, Host: ${isHost()}`);
 
-            // 2. Setup the Join Listener (works for host only; spectators don't receive this)
             onPlayerJoin((player: PlayroomPlayer) => {
-                console.log(`[Network] Player joined (onPlayerJoin): ${player.id}`);
                 this.registerPlayer(player);
             });
-
-            // 3. Fallback: Sync from getParticipants() every frame. With streamMode, the first
-            // player is a SPECTATOR, not the host, so onPlayerJoin never fires for them. But
-            // getParticipants() is updated via sync for all clients. We reconcile in getRemotePlayers.
         } catch (e) {
             console.error("[Network] Initialization failed:", e);
         }
@@ -57,22 +59,20 @@ export class NetworkManager {
     private registerPlayer(player: PlayroomPlayer) {
         if (this.knownIds.has(player.id)) return;
         
-        console.log(`[Network] Registering Player: ${player.id} (Local: ${player.id === this.localId})`);
         this.knownIds.add(player.id);
         this.players.push(player);
 
         player.onQuit(() => {
-            console.log(`[Network] Removing Player: ${player.id}`);
+            const mesh = this.remoteVisuals.get(player.id);
+            if (mesh && this.scene) {
+                this.scene.remove(mesh);
+            }
+            this.remoteVisuals.delete(player.id);
             this.knownIds.delete(player.id);
             this.players = this.players.filter(p => p.id !== player.id);
         });
     }
 
-    /**
-     * Reconcile our player list with getParticipants(). Needed because with streamMode,
-     * the first player (spectator) never receives onPlayerJoin.
-     * Note: getParticipants() returns an array, not Record<id, PlayerState>.
-     */
     private syncFromParticipants() {
         const participants = getParticipants();
         const participantList = Array.isArray(participants) ? participants : Object.values(participants);
@@ -86,9 +86,12 @@ export class NetworkManager {
             if (this.knownIds.has(player.id)) continue;
             this.registerPlayer(player);
         }
-        // Remove players who left (no longer in participants)
+        
         this.players = this.players.filter(p => {
             if (!currentIds.has(p.id)) {
+                const mesh = this.remoteVisuals.get(p.id);
+                if (mesh && this.scene) this.scene.remove(mesh);
+                this.remoteVisuals.delete(p.id);
                 this.knownIds.delete(p.id);
                 return false;
             }
@@ -96,50 +99,49 @@ export class NetworkManager {
         });
     }
 
-    /**
-     * Sends state to peers.
-     */
     public sendState(position: THREE.Vector3, rotation: number) {
         const me = myPlayer();
         if (!this.isReady || !me) return;
-
-        // Reliable: false (Unreliable/Volatile) for movement
         me.setState("pos", { x: position.x, y: position.y, z: position.z }, false);
         me.setState("rot", rotation, false);
     }
 
     /**
-     * Maps the Playroom player states to a format our renderer understands.
+     * Updated to handle visual updates internally.
+     * This avoids garbage collection pressure from creating Maps/Objects every frame.
      */
-    public getRemotePlayers(): Map<string, PlayerData> {
-        const remoteMap = new Map<string, PlayerData>();
-        if (!this.isReady) return remoteMap;
+    public updateRemotePlayers() {
+        if (!this.isReady || !this.scene) return;
 
         const now = performance.now();
         if (now - this.lastSyncTime >= SYNC_INTERVAL_MS) {
             this.lastSyncTime = now;
             this.syncFromParticipants();
         }
+
         const me = myPlayer();
         
-        // Iterate through all players (from onPlayerJoin + syncFromParticipants fallback)
         for (const playerState of this.players) {
             if (playerState.id === me?.id) continue;
 
             const pos = playerState.getState("pos");
             const rot = playerState.getState("rot");
 
-            // Only return players who have valid position data
             if (pos && typeof pos.x === 'number') {
-                remoteMap.set(playerState.id, {
-                    id: playerState.id,
-                    position: pos,
-                    rotation: rot || 0
-                });
+                let mesh = this.remoteVisuals.get(playerState.id);
+                
+                // Lazy create the mesh if it doesn't exist
+                if (!mesh) {
+                    mesh = new THREE.Mesh(this.remoteGeometry, this.remoteMaterial);
+                    this.scene.add(mesh);
+                    this.remoteVisuals.set(playerState.id, mesh);
+                }
+
+                // Update existing mesh properties (zero allocation)
+                mesh.position.set(pos.x, pos.y, pos.z);
+                mesh.rotation.y = rot || 0;
             }
         }
-
-        return remoteMap;
     }
 
     public getLocalId(): string {
