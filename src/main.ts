@@ -1,147 +1,191 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-
 import { Player } from './player';
+import { CameraManager, CameraFactory } from './camera';
+import { MouseLook } from './camera';
 
-// 1. Initialize Rapier
-await RAPIER.init();
+async function init() {
+    await RAPIER.init();
+    const world = new RAPIER.World({ x: 0.0, y: -9.81, z: 0.0 });
 
-const g = -9.81
-const gravity = { x: 0.0, y: g, z: 0.0 };
-const world = new RAPIER.World(gravity);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb);
 
-// 2. Scene Setup
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb); // Sky blue
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
 
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(0, 10, 15);
-camera.lookAt(0, 0, 0);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    const sunLight = new THREE.DirectionalLight(0xffffff, 1);
+    sunLight.position.set(10, 20, 10);
+    sunLight.castShadow = true;
+    scene.add(sunLight);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
-document.body.appendChild(renderer.domElement);
+    // FPS Counter UI
+    const fpsDisplay = document.createElement('div');
+    Object.assign(fpsDisplay.style, {
+        position: 'fixed',
+        top: '10px',
+        left: '10px',
+        color: 'white',
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        padding: '5px 10px',
+        fontFamily: 'monospace',
+        fontSize: '14px',
+        borderRadius: '4px',
+        pointerEvents: 'none',
+        zIndex: '1000'
+    });
+    fpsDisplay.textContent = 'FPS: 0';
+    document.body.appendChild(fpsDisplay);
 
-// Lighting
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-scene.add(ambientLight);
+    let lastTime = performance.now();
+    let frames = 0;
+    let fpsInterval = 0;
 
-const sunLight = new THREE.DirectionalLight(0xffffff, 1);
-sunLight.position.set(10, 20, 10);
-sunLight.castShadow = true;
-sunLight.shadow.camera.left = -20;
-sunLight.shadow.camera.right = 20;
-sunLight.shadow.camera.top = 20;
-sunLight.shadow.camera.bottom = -20;
-scene.add(sunLight);
+    // Floor
+    world.createCollider(
+        RAPIER.ColliderDesc.cuboid(20, 0.5, 20),
+        world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 0))
+    );
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(40, 1, 40), new THREE.MeshStandardMaterial({ color: 0x40a040 }));
+    floor.receiveShadow = true;
+    scene.add(floor);
 
-// 3. Environment: Floor
-const floorSize = 40;
-const floorMesh = new THREE.Mesh(
-  new THREE.BoxGeometry(floorSize, 1, floorSize),
-  new THREE.MeshStandardMaterial({ color: 0x40a040 })
-);
-floorMesh.receiveShadow = true;
-scene.add(floorMesh);
+    // Player
+    const player = new Player(1);
+    const { playerBody, playerCollider, playerController } = player.attachToWorld(world);
+    player.attachToScene(scene);
 
-const floorBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, -0, 0));
-const floorCollider = RAPIER.ColliderDesc.cuboid(floorSize / 2, 0.5, floorSize / 2);
-world.createCollider(floorCollider, floorBody);
+    // Look Direction Visualizer
+    const lineMaterial = new THREE.LineBasicMaterial({ color: 0xffff00 });
+    const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0, 0, -3)
+    ]);
+    const lookLine = new THREE.Line(lineGeometry, lineMaterial);
+    scene.add(lookLine);
 
+    // --- DECOUPLED PROVIDERS ---
 
-// 4. Player
-const player = new Player(1);
-const { playerBody, playerCollider, playerController } = player.attachToWorld(world);
-player.attachToScene(scene);
+    const mouseLook = new MouseLook();
+    const lookAngleProvider = mouseLook.getProvider();
 
+    // Persistant vector for the provider to avoid GC pressure
+    const playerPosResult = new THREE.Vector3();
+    const playerPosProvider = () => {
+        const t = playerBody.translation();
+        return playerPosResult.set(t.x, t.y, t.z);
+    };
 
-// 6. Input Handling
-const keys = {
-  w: false,
-  a: false,
-  s: false,
-  d: false,
-  space: false
-};
+    // Initialize Camera
+    const orbitalConfig = CameraFactory.createOrbital(
+        playerPosProvider,
+        lookAngleProvider, 
+        12,
+        2,
+        new THREE.Vector3(0, 1.5, 0)
+    );
 
-window.addEventListener('keydown', (e) => {
-  if (e.code === 'KeyW') keys.w = true;
-  if (e.code === 'KeyA') keys.a = true;
-  if (e.code === 'KeyS') keys.s = true;
-  if (e.code === 'KeyD') keys.d = true;
-  if (e.code === 'Space') keys.space = true;
-});
+    const cameraManager = new CameraManager(window.innerWidth / window.innerHeight, orbitalConfig);
 
-window.addEventListener('keyup', (e) => {
-  if (e.code === 'KeyW') keys.w = false;
-  if (e.code === 'KeyA') keys.a = false;
-  if (e.code === 'KeyS') keys.s = false;
-  if (e.code === 'KeyD') keys.d = false;
-  if (e.code === 'Space') keys.space = false;
-});
+    // Input Handling
+    const keys = { w: false, a: false, s: false, d: false, space: false };
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'KeyW') keys.w = true;
+        if (e.code === 'KeyA') keys.a = true;
+        if (e.code === 'KeyS') keys.s = true;
+        if (e.code === 'KeyD') keys.d = true;
+        if (e.code === 'Space') keys.space = true;
+        if (e.code === 'Digit1') cameraManager.setConfig(orbitalConfig);
+        if (e.code === 'Digit2') cameraManager.setConfig(CameraFactory.createTopDown(playerPosProvider, 20));
+    });
+    window.addEventListener('keyup', (e) => {
+        if (e.code === 'KeyW') keys.w = false;
+        if (e.code === 'KeyA') keys.a = false;
+        if (e.code === 'KeyS') keys.s = false;
+        if (e.code === 'KeyD') keys.d = false;
+        if (e.code === 'Space') keys.space = false;
+    });
 
-// Movement Constants
-const moveSpeed = 0.15;
-let verticalVelocity = 0;
-const jumpVelocity = 0.3;
-const gravityTick = -0.015;
+    const moveSpeed = 0.15;
+    const jumpVelocity = 0.3;
+    let verticalVelocity = 0;
 
-// 7. Animation Loop
-function animate() {
-  requestAnimationFrame(animate);
+    // Pre-allocated vectors for math operations inside the loop
+    const movement = new THREE.Vector3();
+    const forward = new THREE.Vector3();
+    const right = new THREE.Vector3();
 
-  // A. Calculate Desired Movement
-  const movement = new THREE.Vector3(0, 0, 0);
-  if (keys.w) movement.z -= moveSpeed;
-  if (keys.s) movement.z += moveSpeed;
-  if (keys.a) movement.x -= moveSpeed;
-  if (keys.d) movement.x += moveSpeed;
+    function animate() {
+        requestAnimationFrame(animate);
 
-  // B. Handle Manual Gravity/Jumping (Required for Kinematic)
-  const isGrounded = playerController.computedGrounded();
-  
-  if (isGrounded && verticalVelocity < 0) {
-      verticalVelocity = -0.01; // Small constant force down
-  } else {
-      verticalVelocity += gravityTick;
-  }
+        // Calculate FPS
+        const time = performance.now();
+        frames++;
+        if (time > lastTime + 1000) {
+            fpsDisplay.textContent = `FPS: ${Math.round((frames * 1000) / (time - lastTime))}`;
+            lastTime = time;
+            frames = 0;
+        }
 
-  if (isGrounded && keys.space) {
-      verticalVelocity = jumpVelocity;
-  }
-  
-  movement.y = verticalVelocity;
+        const { theta, phi } = lookAngleProvider();
+        
+        // Update direction vectors without "new"
+        forward.set(-Math.sin(theta), 0, -Math.cos(theta));
+        right.set(-forward.z, 0, forward.x); // Perpendicular to forward
 
-  // C. Compute collisions & apply movement
-  playerController.computeColliderMovement(playerCollider, movement);
-  const correctedMovement = playerController.computedMovement();
+        // Reset and accumulate movement
+        movement.set(0, 0, 0);
+        if (keys.w) movement.addScaledVector(forward, moveSpeed);
+        if (keys.s) movement.addScaledVector(forward, -moveSpeed);
+        if (keys.a) movement.addScaledVector(right, -moveSpeed);
+        if (keys.d) movement.addScaledVector(right, moveSpeed);
 
-  const currentPos = playerBody.translation();
-  playerBody.setNextKinematicTranslation({
-      x: currentPos.x + correctedMovement.x,
-      y: currentPos.y + correctedMovement.y,
-      z: currentPos.z + correctedMovement.z
-  });
+        // Gravity/Physics logic
+        const isGrounded = playerController.computedGrounded();
+        verticalVelocity = isGrounded && verticalVelocity < 0 ? -0.01 : verticalVelocity - 0.015;
+        if (isGrounded && keys.space) verticalVelocity = jumpVelocity;
+        movement.y = verticalVelocity;
 
-  // D. Step Physics & Sync Visuals
-  world.step();
-  const t = playerBody.translation();
-  player.playerMesh.position.set(t.x, t.y, t.z);
+        // Rapier physics interaction
+        playerController.computeColliderMovement(playerCollider, movement);
+        const corrected = playerController.computedMovement();
+        const p = playerBody.translation();
+        
+        playerBody.setNextKinematicTranslation({ 
+            x: p.x + corrected.x, 
+            y: p.y + corrected.y, 
+            z: p.z + corrected.z 
+        });
 
-  // Smooth Camera Follow
-  const targetCamPos = new THREE.Vector3(t.x, t.y + 10, t.z + 15);
-  camera.position.lerp(targetCamPos, 0.1);
-  camera.lookAt(t.x, t.y, t.z);
+        world.step();
+        
+        // Sync Visuals
+        const t = playerBody.translation();
+        player.playerMesh.position.set(t.x, t.y, t.z);
+        
+        // Update Look Line Visualizer
+        lookLine.position.set(t.x, t.y, t.z);
+        lookLine.rotation.set(0, 0, 0);
+        lookLine.rotateY(theta);
+        lookLine.rotateX(-phi);
 
-  renderer.render(scene, camera);
+        // Update player rotation based on movement direction
+        if (Math.abs(movement.x) > 0.001 || Math.abs(movement.z) > 0.001) {
+            player.playerMesh.rotation.y = Math.atan2(movement.x, movement.z);
+        }
+
+        cameraManager.update();
+        renderer.render(scene, cameraManager.camera);
+    }
+
+    animate();
+    window.addEventListener('resize', () => {
+        cameraManager.onResize(window.innerWidth, window.innerHeight);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
 }
 
-animate();
-
-// Resize handler
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+init();
