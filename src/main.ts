@@ -5,6 +5,7 @@ import { CameraManager, CameraFactory } from './camera';
 import { MouseLook } from './input';
 import { NetworkManager } from './network';
 import { PauseMenu } from './pauseMenu';
+import { EnvironmentObject } from './environmentObject';
 
 async function init() {
     // 1. Physics Engine Setup
@@ -39,6 +40,20 @@ async function init() {
     );
     floor.receiveShadow = true;
     scene.add(floor);
+
+    // 4. Glass Objects / Platforms
+    const platforms: EnvironmentObject[] = [];
+
+    // Low platform
+    platforms.push(new EnvironmentObject(world, scene, new THREE.Vector3(5, 1, 5), new THREE.Vector3(4, 0.2, 4)));
+    
+    // Higher stairs
+    platforms.push(new EnvironmentObject(world, scene, new THREE.Vector3(0, 3, 8), new THREE.Vector3(3, 0.2, 3), 0xff88cc));
+    platforms.push(new EnvironmentObject(world, scene, new THREE.Vector3(-4, 5, 4), new THREE.Vector3(3, 0.2, 3), 0x88ffcc));
+    
+    // A large glass wall to walk through/around
+    platforms.push(new EnvironmentObject(world, scene, new THREE.Vector3(0, 4, -10), new THREE.Vector3(10, 8, 0.5), 0xffffff));
+    
 
     // 4. Multiplayer & UI Setup
     const network = new NetworkManager();
