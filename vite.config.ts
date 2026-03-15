@@ -3,5 +3,16 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   // plugins: [react()],
-  base: "https://sorenint2000.github.io/ThreeJSPhysics/",
+  base: "./",
+  publicDir: "public",
+  build: {
+    outDir: "dist",
+    assetsDir: "assets",
+    sourcemap: true,
+    rollupOptions: {
+      input: {
+        main: "src/main.ts",
+      }
+    }
+  }
 });
