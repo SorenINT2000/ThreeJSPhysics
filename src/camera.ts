@@ -42,7 +42,7 @@ export class MouseLook {
             if (!this.isPointerLocked) return;
             const sensitivity = 0.002;
             this.state.theta -= e.movementX * sensitivity;
-            this.state.phi += e.movementY * sensitivity;
+            this.state.phi -= e.movementY * sensitivity;
             this.state.phi = Math.max(0.1, Math.min(Math.PI / 2.1, this.state.phi));
         });
     }
