@@ -12,13 +12,21 @@ class ConfigurableRenderer {
     private composer: EffectComposer;
     private passes: Pass[];
 
-    constructor(scene: THREE.Scene, camera: THREE.Camera) {
+    constructor(scene: THREE.Scene, camera: THREE.Camera, fullscreen: boolean = false, width?: number, height?: number) {
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         document.body.appendChild(this.renderer.domElement);
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.shadowMap.enabled = true;
+        
+        if (fullscreen) {
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+            window.addEventListener('resize', () => {
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        } else if (width && height) {
+            this.renderer.setSize(width, height);
+        }
 
         this.composer = new EffectComposer(this.renderer);
 

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { Player } from './player';
 import { ConfigurableCamera } from './camera';
-import { LookState } from './input';
+import { LookState, KeyboardState } from './input';
 import { NetworkManager } from './network';
 import { PauseMenu } from './pauseMenu';
 import { EnvironmentObject } from './environmentObject';
@@ -63,7 +63,7 @@ async function init() {
     
 
     // 4. Multiplayer & UI Setup
-    let networking = false;
+    let networking = true;
     let network = networking? new NetworkManager() : null;
     network?.setScene(scene); // Let the network manager manage remote meshes
 
@@ -142,8 +142,9 @@ async function init() {
     const mainCamera = thirdPersonCamera;
     const miniMapCamera = topDownCameraFollow;
 
-    const mainRenderer = new ConfigurableRenderer(scene, mainCamera.camera);
-    const miniMapRenderer = new ConfigurableRenderer(scene, miniMapCamera.camera);
+    const mainRenderer = new ConfigurableRenderer(scene, mainCamera.camera, true);
+    const miniMapRenderer = new ConfigurableRenderer(scene, miniMapCamera.camera, false, 200, 200);
+
     // Configure the mini-map renderer DOM element to be fixed in the top right corner
     Object.assign(miniMapRenderer.renderer.domElement.style, {
         position: 'fixed',
@@ -156,29 +157,9 @@ async function init() {
         background: 'rgba(0,0,0,0.2)',
         pointerEvents: 'none',
     });
-
-
-
-    // Controls
-    const keys = { w: false, a: false, s: false, d: false, space: false };
-    window.addEventListener('keydown', (e) => {
-        if (e.code === 'KeyW') keys.w = true;
-        if (e.code === 'KeyA') keys.a = true;
-        if (e.code === 'KeyS') keys.s = true;
-        if (e.code === 'KeyD') keys.d = true;
-        if (e.code === 'Space') keys.space = true;
-
-        // if (e.code === 'Key1') 
-    });
-    window.addEventListener('keyup', (e) => {
-        if (e.code === 'KeyW') keys.w = false;
-        if (e.code === 'KeyA') keys.a = false;
-        if (e.code === 'KeyS') keys.s = false;
-        if (e.code === 'KeyD') keys.d = false;
-        if (e.code === 'Space') keys.space = false;
-    });
-
-
+    
+    const keys = new KeyboardState(["KeyW", "KeyA", "KeyS", "KeyD", "Space"]);
+    
     // 6. Game Loop
     let lastTime = performance.now();
     let frames = 0;
@@ -205,14 +186,14 @@ async function init() {
         player.updateLookFromState(mouseLook.state);
         
         player.velocity.set(0, 0, 0);
-        if (keys.w) player.velocity.addScaledVector(player.forwardDirection, moveSpeed);
-        if (keys.s) player.velocity.addScaledVector(player.forwardDirection, -moveSpeed);
-        if (keys.a) player.velocity.addScaledVector(player.rightDirection, -moveSpeed);
-        if (keys.d) player.velocity.addScaledVector(player.rightDirection, moveSpeed);
+        if (keys.state.KeyW) player.velocity.addScaledVector(player.forwardDirection, moveSpeed);
+        if (keys.state['KeyS']) player.velocity.addScaledVector(player.forwardDirection, -moveSpeed);
+        if (keys.state['KeyA']) player.velocity.addScaledVector(player.rightDirection, -moveSpeed);
+        if (keys.state['KeyD']) player.velocity.addScaledVector(player.rightDirection, moveSpeed);
 
         const isGrounded = playerController.computedGrounded();
         verticalVelocity = isGrounded && verticalVelocity < 0 ? -0.01 : verticalVelocity - 0.015;
-        if (isGrounded && keys.space) verticalVelocity = jumpVelocity;
+        if (isGrounded && keys.state['Space']) verticalVelocity = jumpVelocity;
         player.velocity.y = verticalVelocity;
 
         playerController.computeColliderMovement(playerCollider, player.velocity);
