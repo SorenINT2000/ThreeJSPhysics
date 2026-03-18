@@ -1,11 +1,14 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { Player } from './player';
-import { CameraManager, CameraFactory } from './camera';
-import { MouseLook } from './input';
+import { ConfigurableCamera } from './camera';
+import { LookState } from './input';
 import { NetworkManager } from './network';
 import { PauseMenu } from './pauseMenu';
 import { EnvironmentObject } from './environmentObject';
+import { LightSource } from './lighting';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { ConfigurableRenderer } from './renderer';
 
 async function init() {
     // 1. Physics Engine Setup
@@ -16,17 +19,11 @@ async function init() {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x87ceeb);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.shadowMap.enabled = true;
-    document.body.appendChild(renderer.domElement);
-
     // Lighting
     scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-    const sunLight = new THREE.DirectionalLight(0xffffff, 1);
-    sunLight.position.set(10, 20, 10);
-    sunLight.castShadow = true;
-    scene.add(sunLight);
+    const lightSource = new LightSource(0xffffff, 1);
+    scene.add(lightSource)
+    lightSource.setPos(0, 5, 0);
 
     // 3. Environment
     const floorSize = 20;
@@ -36,7 +33,7 @@ async function init() {
     );
     const floor = new THREE.Mesh(
         new THREE.BoxGeometry(floorSize * 2, 1, floorSize * 2), 
-        new THREE.MeshStandardMaterial({ color: 0x40a040 })
+        new THREE.MeshStandardMaterial({ color: 0xffffff })
     );
     floor.receiveShadow = true;
     scene.add(floor);
@@ -53,11 +50,22 @@ async function init() {
     
     // A large glass wall to walk through/around
     platforms.push(new EnvironmentObject(world, scene, new THREE.Vector3(0, 4, -10), new THREE.Vector3(10, 8, 0.5), 0xffffff));
+
+    // Add a snowman
+    const loader = new GLTFLoader();
+    loader.load('./snowman_amanda_losneck.glb', (gltf) => {
+        const snowman = gltf.scene;
+        snowman.position.set(20, 0.5, 15);
+        snowman.rotation.set(0, Math.PI / 5, 0);
+        snowman.castShadow = true;
+        scene.add(snowman);
+    });
     
 
     // 4. Multiplayer & UI Setup
-    const network = new NetworkManager();
-    network.setScene(scene); // Let the network manager manage remote meshes
+    let networking = false;
+    let network = networking? new NetworkManager() : null;
+    network?.setScene(scene); // Let the network manager manage remote meshes
 
     const pauseMenu = new PauseMenu((paused) => {
         // Handle pointer lock logic or pause physics if needed
@@ -72,23 +80,84 @@ async function init() {
     });
     document.body.appendChild(uiContainer);
 
+
+
+    const mouseLook = new LookState();
+    let isPointerLocked = false;
+    window.addEventListener('mousedown', () => {
+        if (!isPointerLocked) document.body.requestPointerLock();
+    });
+
+    document.addEventListener('pointerlockchange', () => {
+        isPointerLocked = document.pointerLockElement === document.body;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!isPointerLocked) return;
+
+        const sensitivity = 0.002;
+        
+        mouseLook.state.theta -= e.movementX * sensitivity; // Yaw
+        mouseLook.state.phi += e.movementY * sensitivity; // Pitch
+
+        mouseLook.state.phi = Math.max(0.1, Math.min(Math.PI - 0.1, mouseLook.state.phi));
+    });
+
     // 5. Local Player & Input
-    const player = new Player(1);
+    const initialPlayerPosition = new THREE.Vector3(0, 5, 0);
+    const playerVelocity = new THREE.Vector3();
+
+    const player = new Player(1, initialPlayerPosition, playerVelocity, mouseLook);
     const { playerBody, playerCollider, playerController } = player.attachToWorld(world);
     player.attachToScene(scene);
 
-    const mouseLook = new MouseLook();
-    const lookAngleProvider = mouseLook.getProvider();
-    
-    const playerPosResult = new THREE.Vector3();
-    const playerPosProvider = () => {
-        const t = playerBody.translation();
-        return playerPosResult.set(t.x, t.y, t.z);
-    };
+    const topDownCamera = new ConfigurableCamera(
+        new THREE.OrthographicCamera(-10, 10, 10, -10, 1, 1000),
+        new THREE.Vector3(0, 20, 0),
+        new THREE.Vector3(0, 0, 0)
+    );
 
-    // Camera Configuration
-    const orbitalConfig = CameraFactory.createOrbital(playerPosProvider, lookAngleProvider, 10, 2, new THREE.Vector3(0, 1, 0));
-    const cameraManager = new CameraManager(window.innerWidth / window.innerHeight, orbitalConfig);
+
+    const topDownCameraFollow = new ConfigurableCamera(
+        new THREE.OrthographicCamera(-10, 10, 10, -10, 1, 1000),
+        new THREE.Vector3(0, 20, 0).add(player.position),
+        new THREE.Vector3(0, 0, 0),
+        (prev) => { prev.setX(player.position.x); prev.setZ(player.position.z); return prev; },
+        (prev) => { prev.setX(player.position.x); prev.setZ(player.position.z); return prev; }
+    )
+
+    const firstPersonCamera = new ConfigurableCamera(
+        new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000),
+        player.position,
+        player.lookDirection,
+    );
+    
+    const thirdPersonCamera = new ConfigurableCamera(
+        new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000),
+        player.position.clone().addScaledVector(player.worldToLocal(player.lookDirection), -10),
+        player.position,
+        (prev) => prev.copy(player.position).addScaledVector(player.worldToLocal(player.lookDirection), -10),
+    );
+    
+    const mainCamera = thirdPersonCamera;
+    const miniMapCamera = topDownCameraFollow;
+
+    const mainRenderer = new ConfigurableRenderer(scene, mainCamera.camera);
+    const miniMapRenderer = new ConfigurableRenderer(scene, miniMapCamera.camera);
+    // Configure the mini-map renderer DOM element to be fixed in the top right corner
+    Object.assign(miniMapRenderer.renderer.domElement.style, {
+        position: 'fixed',
+        top: '10px',
+        right: '10px',
+        width: '200px',
+        height: '200px',
+        zIndex: '1001',
+        border: '2px solid #fff',
+        background: 'rgba(0,0,0,0.2)',
+        pointerEvents: 'none',
+    });
+
+
 
     // Controls
     const keys = { w: false, a: false, s: false, d: false, space: false };
@@ -98,6 +167,8 @@ async function init() {
         if (e.code === 'KeyS') keys.s = true;
         if (e.code === 'KeyD') keys.d = true;
         if (e.code === 'Space') keys.space = true;
+
+        // if (e.code === 'Key1') 
     });
     window.addEventListener('keyup', (e) => {
         if (e.code === 'KeyW') keys.w = false;
@@ -107,6 +178,7 @@ async function init() {
         if (e.code === 'Space') keys.space = false;
     });
 
+
     // 6. Game Loop
     let lastTime = performance.now();
     let frames = 0;
@@ -114,10 +186,6 @@ async function init() {
     const moveSpeed = 0.15;
     const jumpVelocity = 0.3;
     let verticalVelocity = 0;
-    
-    const movement = new THREE.Vector3();
-    const forward = new THREE.Vector3();
-    const right = new THREE.Vector3();
 
     function animate() {
         requestAnimationFrame(animate);
@@ -126,7 +194,7 @@ async function init() {
         const time = performance.now();
         frames++;
         if (time > lastTime + 1000) {
-            uiContainer.innerHTML = `FPS: ${Math.round((frames * 1000) / (time - lastTime))}<br>ID: ${network.getLocalId()}`;
+            uiContainer.innerHTML = `FPS: ${Math.round((frames * 1000) / (time - lastTime))}<br>ID: ${network?.getLocalId()}`;
             lastTime = time;
             frames = 0;
         }
@@ -134,58 +202,46 @@ async function init() {
         if (pauseMenu.getPaused()) return;
 
         // Physics & Movement
-        const { theta } = lookAngleProvider();
-        forward.set(-Math.sin(theta), 0, -Math.cos(theta));
-        right.set(-forward.z, 0, forward.x);
-
-        movement.set(0, 0, 0);
-        if (keys.w) movement.addScaledVector(forward, moveSpeed);
-        if (keys.s) movement.addScaledVector(forward, -moveSpeed);
-        if (keys.a) movement.addScaledVector(right, -moveSpeed);
-        if (keys.d) movement.addScaledVector(right, moveSpeed);
+        player.updateLookFromState(mouseLook.state);
+        
+        player.velocity.set(0, 0, 0);
+        if (keys.w) player.velocity.addScaledVector(player.forwardDirection, moveSpeed);
+        if (keys.s) player.velocity.addScaledVector(player.forwardDirection, -moveSpeed);
+        if (keys.a) player.velocity.addScaledVector(player.rightDirection, -moveSpeed);
+        if (keys.d) player.velocity.addScaledVector(player.rightDirection, moveSpeed);
 
         const isGrounded = playerController.computedGrounded();
         verticalVelocity = isGrounded && verticalVelocity < 0 ? -0.01 : verticalVelocity - 0.015;
         if (isGrounded && keys.space) verticalVelocity = jumpVelocity;
-        movement.y = verticalVelocity;
+        player.velocity.y = verticalVelocity;
 
-        playerController.computeColliderMovement(playerCollider, movement);
-        const corrected = playerController.computedMovement();
-        const p = playerBody.translation();
+        playerController.computeColliderMovement(playerCollider, player.velocity);
+        const correctedVelocity = playerController.computedMovement();
         
-        playerBody.setNextKinematicTranslation({ 
-            x: p.x + corrected.x, 
-            y: p.y + corrected.y, 
-            z: p.z + corrected.z 
-        });
+        player.velocity.copy(correctedVelocity)
+        player.position.add(correctedVelocity);
+        playerBody.setNextKinematicTranslation(player.position);
 
         world.step();
-        
-        // Sync local visual
-        const t = playerBody.translation();
-        player.playerMesh.position.set(t.x, t.y, t.z);
-        if (Math.abs(movement.x) > 0.001 || Math.abs(movement.z) > 0.001) {
-            player.playerMesh.rotation.y = Math.atan2(movement.x, movement.z);
-        }
+
+        // Sync Visuals
+        player.updateVisuals();
 
         // --- Network Updates ---
         // Send our local state to others
-        network.sendState(player.playerMesh.position, player.playerMesh.rotation.y);
+        network?.sendState(player.position, player.rotation.y);
         
         // Update all remote player visuals (handles scene adding/removing internally)
-        network.updateRemotePlayers();
+        network?.updateRemotePlayers();
 
         // Camera & Render
-        cameraManager.update();
-        renderer.render(scene, cameraManager.camera);
+        mainCamera.update();
+        miniMapCamera.update();
+        miniMapRenderer.render();
+        mainRenderer.render();
     }
 
     animate();
-
-    window.addEventListener('resize', () => {
-        cameraManager.onResize(window.innerWidth, window.innerHeight);
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    });
 }
 
 init();
