@@ -1,13 +1,13 @@
 import * as THREE from 'three';
-import { Mesh, BoxGeometry, MeshStandardMaterial, Scene, Object3D, Line } from 'three';
-import { World, RigidBodyDesc, RigidBody, ColliderDesc, Collider, KinematicCharacterController } from '@dimforge/rapier3d-compat';
-import { LookState } from './input';
+import { Mesh, BoxGeometry, MeshStandardMaterial, Object3D, Line } from 'three';
+import { RigidBodyDesc, ColliderDesc } from '@dimforge/rapier3d-compat';
+import { MouseState } from './input';
 
 class Player extends Object3D {
-    private playerMesh: Mesh;
-    private lookLine: Line;
-    private playerBodyDesc: RigidBodyDesc;
-    private playerColliderDesc: ColliderDesc;
+    public playerMesh: Mesh;
+    public lookLine: Line;
+    public playerBodyDesc: RigidBodyDesc;
+    public playerColliderDesc: ColliderDesc;
 
     // Non-visual Data
     // public position: THREE.Vector3; (inherited from Object3D)
@@ -19,7 +19,7 @@ class Player extends Object3D {
     public forwardDirection: THREE.Vector3 = new THREE.Vector3();
     public rightDirection: THREE.Vector3 = new THREE.Vector3();
 
-    constructor(playerSize: number, position: THREE.Vector3, velocity: THREE.Vector3, lookState: LookState) {
+    constructor(playerSize: number, position: THREE.Vector3, velocity: THREE.Vector3, lookState: MouseState) {
         super();
 
         // Setup
@@ -51,21 +51,7 @@ class Player extends Object3D {
         super.add(this.lookLine);
     }
 
-    public attachToWorld(world: World): { playerBody: RigidBody, playerCollider: Collider, playerController: KinematicCharacterController } {
-        // 0.1 is the offset to keep the character slightly above the ground to avoid jitter
-        const playerController = world.createCharacterController(0.01);
-        playerController.enableSnapToGround(0.5);
-        // playerController.enableAutostep(0.5, 0.2, true);
 
-        const playerBody = world.createRigidBody(this.playerBodyDesc);
-        const playerCollider = world.createCollider(this.playerColliderDesc, playerBody);
-
-        return { playerBody, playerCollider, playerController };
-    }
-
-    public attachToScene(scene: Scene): void {
-        scene.add(this);
-    }
 
     public updateLookFromState(state: THREE.Spherical) {
         this.lookDirection.setFromSpherical(state);

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import { Player } from './player';
 
-export class ConfigurableCamera {
+class ConfigurableCamera {
     public camera: THREE.Camera;
     public target: THREE.Vector3;
     public position: THREE.Vector3;
@@ -46,3 +47,32 @@ export class ConfigurableCamera {
         this.camera.lookAt(this.target)
     }
 }
+
+const topDownCamera = new ConfigurableCamera(
+    new THREE.OrthographicCamera(-10, 10, 10, -10, 1, 1000),
+    new THREE.Vector3(0, 20, 0),
+    new THREE.Vector3(0, 0, 0)
+);
+
+const topDownCameraFollow = (player: Player) => new ConfigurableCamera(
+    new THREE.OrthographicCamera(-10, 10, 10, -10, 1, 1000),
+    new THREE.Vector3(0, 20, 0).add(player.position),
+    new THREE.Vector3(0, 0, 0),
+    (prev) => { prev.setX(player.position.x); prev.setZ(player.position.z); return prev; },
+    (prev) => { prev.setX(player.position.x); prev.setZ(player.position.z); return prev; }
+)
+
+const firstPersonCamera = (player: Player) => new ConfigurableCamera(
+    new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000),
+    player.position,
+    player.lookDirection,
+);
+
+const thirdPersonCamera = (player: Player) => new ConfigurableCamera(
+    new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000),
+    player.position.clone().addScaledVector(player.worldToLocal(player.lookDirection), -10),
+    player.position,
+    (prev) => prev.copy(player.position).addScaledVector(player.worldToLocal(player.lookDirection), -10),
+);
+
+export { ConfigurableCamera, topDownCamera, topDownCameraFollow, firstPersonCamera, thirdPersonCamera}

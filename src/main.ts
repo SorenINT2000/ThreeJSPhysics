@@ -1,55 +1,65 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { Player } from './player';
-import { ConfigurableCamera } from './camera';
-import { LookState, KeyboardState } from './input';
+import * as Cameras from './camera';
+import { MouseState, KeyboardState } from './input';
 import { NetworkManager } from './network';
 import { PauseMenu } from './pauseMenu';
 import { EnvironmentObject } from './environmentObject';
-import { LightSource } from './lighting';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ConfigurableRenderer } from './renderer';
+import { Level } from './level';
+
 
 async function init() {
     // 1. Physics Engine Setup
     await RAPIER.init();
-    const world = new RAPIER.World({ x: 0.0, y: -9.81, z: 0.0 });
-
-    // 2. Three.js Scene Setup
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87ceeb);
-
-    // Lighting
-    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-    const lightSource = new LightSource(0xffffff, 1);
-    scene.add(lightSource)
-    lightSource.setPos(0, 5, 0);
+    const clock = new THREE.Clock();
 
     // 3. Environment
     const floorSize = 20;
-    world.createCollider(
+    const floor = new EnvironmentObject(
+        new THREE.BoxGeometry(floorSize * 2, 1, floorSize * 2),
         RAPIER.ColliderDesc.cuboid(floorSize, 0.5, floorSize),
-        world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 0))
-    );
-    const floor = new THREE.Mesh(
-        new THREE.BoxGeometry(floorSize * 2, 1, floorSize * 2), 
+        new THREE.Vector3(0, 0, 0),
         new THREE.MeshStandardMaterial({ color: 0xffffff })
     );
-    floor.receiveShadow = true;
-    scene.add(floor);
+    floor.mesh.receiveShadow = true;
 
     // 4. Glass Objects / Platforms
-    const platforms: EnvironmentObject[] = [];
+    // const platforms: EnvironmentObject[] = [];
 
     // Low platform
-    platforms.push(new EnvironmentObject(world, scene, new THREE.Vector3(5, 1, 5), new THREE.Vector3(4, 0.2, 4)));
+    const platform1 = new EnvironmentObject(
+        new THREE.BoxGeometry(4, 0.2, 4),
+        RAPIER.ColliderDesc.cuboid(2, 0.1, 2),
+        new THREE.Vector3(5, 1, 5)
+    )
+
+    const platform2 = new EnvironmentObject(
+        new THREE.BoxGeometry(4, 0.2, 4),
+        RAPIER.ColliderDesc.cuboid(2, 0.1, 2),
+        new THREE.Vector3(0, 3, 8)
+    )
     
-    // Higher stairs
-    platforms.push(new EnvironmentObject(world, scene, new THREE.Vector3(0, 3, 8), new THREE.Vector3(3, 0.2, 3), 0xff88cc));
-    platforms.push(new EnvironmentObject(world, scene, new THREE.Vector3(-4, 5, 4), new THREE.Vector3(3, 0.2, 3), 0x88ffcc));
+    const platform3 = new EnvironmentObject(
+        new THREE.BoxGeometry(4, 0.2, 4),
+        RAPIER.ColliderDesc.cuboid(2, 0.1, 2),
+        new THREE.Vector3(-4, 5, 4)
+    )
     
     // A large glass wall to walk through/around
-    platforms.push(new EnvironmentObject(world, scene, new THREE.Vector3(0, 4, -10), new THREE.Vector3(10, 8, 0.5), 0xffffff));
+
+    const wall = new EnvironmentObject(
+        new THREE.BoxGeometry(10, 8, 0.5),
+        RAPIER.ColliderDesc.cuboid(5, 4, 0.25),
+        new THREE.Vector3(0, 4, -10)
+    );
+
+    const level = new Level(
+        new THREE.Color(0x87ceeb),
+        [floor, platform1, platform2, platform3, wall]
+    );
 
     // Add a snowman
     const loader = new GLTFLoader();
@@ -58,14 +68,14 @@ async function init() {
         snowman.position.set(20, 0.5, 15);
         snowman.rotation.set(0, Math.PI / 5, 0);
         snowman.castShadow = true;
-        scene.add(snowman);
+        level.add(snowman);
     });
     
 
     // 4. Multiplayer & UI Setup
-    let networking = true;
+    let networking = false;
     let network = networking? new NetworkManager() : null;
-    network?.setScene(scene); // Let the network manager manage remote meshes
+    network?.setScene(level); // Let the network manager manage remote meshes
 
     const pauseMenu = new PauseMenu((paused) => {
         // Handle pointer lock logic or pause physics if needed
@@ -81,69 +91,20 @@ async function init() {
     document.body.appendChild(uiContainer);
 
 
-
-    const mouseLook = new LookState();
-    let isPointerLocked = false;
-    window.addEventListener('mousedown', () => {
-        if (!isPointerLocked) document.body.requestPointerLock();
-    });
-
-    document.addEventListener('pointerlockchange', () => {
-        isPointerLocked = document.pointerLockElement === document.body;
-    });
-
-    window.addEventListener('mousemove', (e) => {
-        if (!isPointerLocked) return;
-
-        const sensitivity = 0.002;
-        
-        mouseLook.state.theta -= e.movementX * sensitivity; // Yaw
-        mouseLook.state.phi += e.movementY * sensitivity; // Pitch
-
-        mouseLook.state.phi = Math.max(0.1, Math.min(Math.PI - 0.1, mouseLook.state.phi));
-    });
+    const mouseLook = new MouseState();
 
     // 5. Local Player & Input
-    const initialPlayerPosition = new THREE.Vector3(0, 5, 0);
+    const initialPlayerPosition = new THREE.Vector3(0, 50, 0);
     const playerVelocity = new THREE.Vector3();
 
     const player = new Player(1, initialPlayerPosition, playerVelocity, mouseLook);
-    const { playerBody, playerCollider, playerController } = player.attachToWorld(world);
-    player.attachToScene(scene);
-
-    const topDownCamera = new ConfigurableCamera(
-        new THREE.OrthographicCamera(-10, 10, 10, -10, 1, 1000),
-        new THREE.Vector3(0, 20, 0),
-        new THREE.Vector3(0, 0, 0)
-    );
-
-
-    const topDownCameraFollow = new ConfigurableCamera(
-        new THREE.OrthographicCamera(-10, 10, 10, -10, 1, 1000),
-        new THREE.Vector3(0, 20, 0).add(player.position),
-        new THREE.Vector3(0, 0, 0),
-        (prev) => { prev.setX(player.position.x); prev.setZ(player.position.z); return prev; },
-        (prev) => { prev.setX(player.position.x); prev.setZ(player.position.z); return prev; }
-    )
-
-    const firstPersonCamera = new ConfigurableCamera(
-        new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000),
-        player.position,
-        player.lookDirection,
-    );
+    const { playerBody, playerCollider, playerController } = level.addPlayer(player);
     
-    const thirdPersonCamera = new ConfigurableCamera(
-        new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000),
-        player.position.clone().addScaledVector(player.worldToLocal(player.lookDirection), -10),
-        player.position,
-        (prev) => prev.copy(player.position).addScaledVector(player.worldToLocal(player.lookDirection), -10),
-    );
-    
-    const mainCamera = thirdPersonCamera;
-    const miniMapCamera = topDownCameraFollow;
+    const mainCamera = Cameras.thirdPersonCamera(player);
+    const miniMapCamera = Cameras.topDownCameraFollow(player);
 
-    const mainRenderer = new ConfigurableRenderer(scene, mainCamera.camera, true);
-    const miniMapRenderer = new ConfigurableRenderer(scene, miniMapCamera.camera, false, 200, 200);
+    const mainRenderer = new ConfigurableRenderer(level, mainCamera.camera, true);
+    const miniMapRenderer = new ConfigurableRenderer(level, miniMapCamera.camera, false, 200, 200);
 
     // Configure the mini-map renderer DOM element to be fixed in the top right corner
     Object.assign(miniMapRenderer.renderer.domElement.style, {
@@ -171,25 +132,20 @@ async function init() {
     function animate() {
         requestAnimationFrame(animate);
 
-        // UI & FPS Counter
-        const time = performance.now();
-        frames++;
-        if (time > lastTime + 1000) {
-            uiContainer.innerHTML = `FPS: ${Math.round((frames * 1000) / (time - lastTime))}<br>ID: ${network?.getLocalId()}`;
-            lastTime = time;
-            frames = 0;
-        }
-
         if (pauseMenu.getPaused()) return;
 
+        // const delta = clock.getDelta();
+
         // Physics & Movement
-        player.updateLookFromState(mouseLook.state);
+        player.updateLookFromState(mouseLook.lookState);
         
         player.velocity.set(0, 0, 0);
-        if (keys.state.KeyW) player.velocity.addScaledVector(player.forwardDirection, moveSpeed);
-        if (keys.state['KeyS']) player.velocity.addScaledVector(player.forwardDirection, -moveSpeed);
-        if (keys.state['KeyA']) player.velocity.addScaledVector(player.rightDirection, -moveSpeed);
-        if (keys.state['KeyD']) player.velocity.addScaledVector(player.rightDirection, moveSpeed);
+        if (keys.state.KeyW) player.velocity.addScaledVector(player.forwardDirection, 1);
+        if (keys.state.KeyS) player.velocity.addScaledVector(player.forwardDirection, -1);
+        if (keys.state.KeyA) player.velocity.addScaledVector(player.rightDirection, -1);
+        if (keys.state.KeyD) player.velocity.addScaledVector(player.rightDirection, 1);
+
+        player.velocity.normalize().multiplyScalar(moveSpeed)
 
         const isGrounded = playerController.computedGrounded();
         verticalVelocity = isGrounded && verticalVelocity < 0 ? -0.01 : verticalVelocity - 0.015;
@@ -199,11 +155,17 @@ async function init() {
         playerController.computeColliderMovement(playerCollider, player.velocity);
         const correctedVelocity = playerController.computedMovement();
         
+        if (correctedVelocity.x === 0 && correctedVelocity.y === 0 && correctedVelocity.z === 0) {
+            if (player.velocity.x !== 0 && player.velocity.y !== 0 && player.velocity.z !== 0)
+                console.log("0 velocity: " + player.position.z, player.velocity.x);
+        }
+
         player.velocity.copy(correctedVelocity)
         player.position.add(correctedVelocity);
         playerBody.setNextKinematicTranslation(player.position);
 
-        world.step();
+
+        level.stepPhysics();
 
         // Sync Visuals
         player.updateVisuals();
@@ -220,6 +182,15 @@ async function init() {
         miniMapCamera.update();
         miniMapRenderer.render();
         mainRenderer.render();
+
+        // UI & FPS Counter
+        const time = performance.now();
+        frames++;
+        if (time > lastTime + 1000) {
+            uiContainer.innerHTML = `FPS: ${Math.round((frames * 1000) / (time - lastTime))}<br>ID: ${network?.getLocalId()}`;
+            lastTime = time;
+            frames = 0;
+        }
     }
 
     animate();
