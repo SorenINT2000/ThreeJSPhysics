@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d-compat';
+import { Jolt } from './jolt';
 import { Player } from './player';
 import * as Cameras from './camera';
 import { MouseState, KeyboardState } from './input';
@@ -12,56 +12,49 @@ import { Level } from './level';
 
 
 async function init() {
-    // 1. Physics Engine Setup
-    await RAPIER.init();
     const clock = new THREE.Clock();
 
-    // 3. Environment
+    // 2. Environment objects: (geometry, halfExtents, position, material?)
     const floorSize = 20;
     const floor = new EnvironmentObject(
         new THREE.BoxGeometry(floorSize * 2, 1, floorSize * 2),
-        RAPIER.ColliderDesc.cuboid(floorSize, 0.5, floorSize),
+        new THREE.Vector3(floorSize, 0.5, floorSize),
         new THREE.Vector3(0, 0, 0),
         new THREE.MeshStandardMaterial({ color: 0xffffff })
     );
     floor.mesh.receiveShadow = true;
 
-    // 4. Glass Objects / Platforms
-    // const platforms: EnvironmentObject[] = [];
-
-    // Low platform
     const platform1 = new EnvironmentObject(
         new THREE.BoxGeometry(4, 0.2, 4),
-        RAPIER.ColliderDesc.cuboid(2, 0.1, 2),
+        new THREE.Vector3(2, 0.1, 2),
         new THREE.Vector3(5, 1, 5)
-    )
+    );
 
     const platform2 = new EnvironmentObject(
         new THREE.BoxGeometry(4, 0.2, 4),
-        RAPIER.ColliderDesc.cuboid(2, 0.1, 2),
+        new THREE.Vector3(2, 0.1, 2),
         new THREE.Vector3(0, 3, 8)
-    )
-    
+    );
+
     const platform3 = new EnvironmentObject(
         new THREE.BoxGeometry(4, 0.2, 4),
-        RAPIER.ColliderDesc.cuboid(2, 0.1, 2),
+        new THREE.Vector3(2, 0.1, 2),
         new THREE.Vector3(-4, 5, 4)
-    )
-    
-    // A large glass wall to walk through/around
+    );
 
     const wall = new EnvironmentObject(
         new THREE.BoxGeometry(10, 8, 0.5),
-        RAPIER.ColliderDesc.cuboid(5, 4, 0.25),
+        new THREE.Vector3(5, 4, 0.25),
         new THREE.Vector3(0, 4, -10)
     );
 
+    // 3. Scene / physics world
     const level = new Level(
         new THREE.Color(0x87ceeb),
         [floor, platform1, platform2, platform3, wall]
     );
 
-    // Add a snowman
+    // Snowman decoration (visual only, no physics)
     const loader = new GLTFLoader();
     loader.load('./snowman_amanda_losneck.glb', (gltf) => {
         const snowman = gltf.scene;
@@ -70,16 +63,12 @@ async function init() {
         snowman.castShadow = true;
         level.add(snowman);
     });
-    
 
-    // 4. Multiplayer & UI Setup
     let networking = false;
-    let network = networking? new NetworkManager() : null;
-    network?.setScene(level); // Let the network manager manage remote meshes
+    const network = networking ? new NetworkManager() : null;
+    network?.setScene(level);
 
-    const pauseMenu = new PauseMenu((paused) => {
-        // Handle pointer lock logic or pause physics if needed
-    });
+    const pauseMenu = new PauseMenu((_paused) => {});
 
     const uiContainer = document.createElement('div');
     Object.assign(uiContainer.style, {
@@ -90,100 +79,109 @@ async function init() {
     });
     document.body.appendChild(uiContainer);
 
-
     const mouseLook = new MouseState();
 
-    // 5. Local Player & Input
-    const initialPlayerPosition = new THREE.Vector3(0, 50, 0);
+    const initialPlayerPosition = new THREE.Vector3(0, 5, 0);
     const playerVelocity = new THREE.Vector3();
 
     const player = new Player(1, initialPlayerPosition, playerVelocity, mouseLook);
-    const { playerBody, playerCollider, playerController } = level.addPlayer(player);
-    
+    const { character } = level.addPlayer(player);
+
     const mainCamera = Cameras.thirdPersonCamera(player);
     const miniMapCamera = Cameras.topDownCameraFollow(player);
 
     const mainRenderer = new ConfigurableRenderer(level, mainCamera.camera, true);
     const miniMapRenderer = new ConfigurableRenderer(level, miniMapCamera.camera, false, 200, 200);
 
-    // Configure the mini-map renderer DOM element to be fixed in the top right corner
     Object.assign(miniMapRenderer.renderer.domElement.style, {
-        position: 'fixed',
-        top: '10px',
-        right: '10px',
-        width: '200px',
-        height: '200px',
-        zIndex: '1001',
-        border: '2px solid #fff',
-        background: 'rgba(0,0,0,0.2)',
+        position: 'fixed', top: '10px', right: '10px',
+        width: '200px', height: '200px', zIndex: '1001',
+        border: '2px solid #fff', background: 'rgba(0,0,0,0.2)',
         pointerEvents: 'none',
     });
-    
+
     const keys = new KeyboardState(["KeyW", "KeyA", "KeyS", "KeyD", "Space"]);
-    
-    // 6. Game Loop
+
     let lastTime = performance.now();
     let frames = 0;
-    
-    const moveSpeed = 0.15;
-    const jumpVelocity = 0.3;
+
+    // Movement constants — units per second
+    const GRAVITY = 200;
+    const moveSpeed = 24;
+    const jumpVelocity = 40;
+
+    // Jolt objects that are reused every frame — create once, never destroy
+    const zeroGravity = new Jolt.Vec3(0, 0, 0);
+    const bodyFilter = new Jolt.BodyFilter();
+    const shapeFilter = new Jolt.ShapeFilter();
+    const charUpdateSettings = new Jolt.ExtendedUpdateSettings();
+    // Snap-to-floor step (replaces Rapier's enableSnapToGround)
+    charUpdateSettings.mStickToFloorStepDown = new Jolt.Vec3(0, -0.1, 0);
+    // Stair step-up height (replaces Rapier's enableAutostep)
+    charUpdateSettings.mWalkStairsStepUp = new Jolt.Vec3(0, 0.4, 0);
+
+    // Vertical velocity tracked in JS — gravity applied manually, not inside Jolt
     let verticalVelocity = 0;
 
     function animate() {
         requestAnimationFrame(animate);
-
         if (pauseMenu.getPaused()) return;
 
-        // const delta = clock.getDelta();
+        const deltaTime = Math.min(clock.getDelta(), 1 / 30);
 
-        // Physics & Movement
         player.updateLookFromState(mouseLook.lookState);
-        
-        player.velocity.set(0, 0, 0);
-        if (keys.state.KeyW) player.velocity.addScaledVector(player.forwardDirection, 1);
-        if (keys.state.KeyS) player.velocity.addScaledVector(player.forwardDirection, -1);
-        if (keys.state.KeyA) player.velocity.addScaledVector(player.rightDirection, -1);
-        if (keys.state.KeyD) player.velocity.addScaledVector(player.rightDirection, 1);
 
-        player.velocity.normalize().multiplyScalar(moveSpeed)
+        // ── Horizontal movement from input ────────────────────────────────────
+        const moveDir = new THREE.Vector3();
+        if (keys.state.KeyW) moveDir.addScaledVector(player.forwardDirection, 1);
+        if (keys.state.KeyS) moveDir.addScaledVector(player.forwardDirection, -1);
+        if (keys.state.KeyA) moveDir.addScaledVector(player.rightDirection, -1);
+        if (keys.state.KeyD) moveDir.addScaledVector(player.rightDirection, 1);
+        moveDir.normalize().multiplyScalar(moveSpeed);
 
-        const isGrounded = playerController.computedGrounded();
-        verticalVelocity = isGrounded && verticalVelocity < 0 ? -0.01 : verticalVelocity - 0.015;
-        if (isGrounded && keys.state['Space']) verticalVelocity = jumpVelocity;
-        player.velocity.y = verticalVelocity;
-
-        playerController.computeColliderMovement(playerCollider, player.velocity);
-        const correctedVelocity = playerController.computedMovement();
-        
-        if (correctedVelocity.x === 0 && correctedVelocity.y === 0 && correctedVelocity.z === 0) {
-            if (player.velocity.x !== 0 && player.velocity.y !== 0 && player.velocity.z !== 0)
-                console.log("0 velocity: " + player.position.z, player.velocity.x);
+        // ── Vertical velocity — gravity applied in JS, zero passed to Jolt ────
+        const isGrounded = character.GetGroundState() === Jolt.EGroundState_OnGround;
+        if (isGrounded) {
+            if (verticalVelocity < 0) verticalVelocity = 0;
+            if (keys.state['Space']) verticalVelocity = jumpVelocity;
+        } else {
+            verticalVelocity -= GRAVITY * deltaTime;
         }
 
-        player.velocity.copy(correctedVelocity)
-        player.position.add(correctedVelocity);
-        playerBody.setNextKinematicTranslation(player.position);
+        // Apply velocity to character
+        const newVel = new Jolt.Vec3(moveDir.x, verticalVelocity, moveDir.z);
+        character.SetLinearVelocity(newVel);
+        Jolt.destroy(newVel);
 
+        // ── Step rigid-body world, then update character ───────────────────────
+        level.stepPhysics(deltaTime);
 
-        level.stepPhysics();
+        // Gravity is managed in JS so we pass zero gravity to ExtendedUpdate
+        character.ExtendedUpdate(
+            deltaTime,
+            zeroGravity,
+            charUpdateSettings,
+            level.bpLayerFilter,
+            level.objLayerFilter,
+            bodyFilter,
+            shapeFilter,
+            level.tempAllocator
+        );
 
-        // Sync Visuals
+        // ── Sync Three.js player position from character ───────────────────────
+        const pos = character.GetPosition();
+        player.position.set(pos.GetX(), pos.GetY(), pos.GetZ());
+
         player.updateVisuals();
 
-        // --- Network Updates ---
-        // Send our local state to others
         network?.sendState(player.position, player.rotation.y);
-        
-        // Update all remote player visuals (handles scene adding/removing internally)
         network?.updateRemotePlayers();
 
-        // Camera & Render
         mainCamera.update();
         miniMapCamera.update();
         miniMapRenderer.render();
         mainRenderer.render();
 
-        // UI & FPS Counter
         const time = performance.now();
         frames++;
         if (time > lastTime + 1000) {
