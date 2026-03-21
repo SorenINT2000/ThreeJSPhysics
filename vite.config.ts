@@ -9,6 +9,7 @@ export default defineConfig({
     outDir: "dist",
     assetsDir: "assets",
     sourcemap: true,
+    target: "es2022",
   },
   optimizeDeps: {
     exclude: ["jolt-physics"],
