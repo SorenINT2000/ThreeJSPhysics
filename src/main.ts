@@ -64,7 +64,7 @@ async function init() {
         level.add(snowman);
     });
 
-    let networking = false;
+    let networking = true;
     const network = networking ? new NetworkManager() : null;
     network?.setScene(level);
 
