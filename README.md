@@ -52,6 +52,7 @@ main.ts animate():
 | `lighting.ts` | `LightSource` — `DirectionalLight` with shadow config |
 | `network.ts` | `NetworkManager` wrapping PlayroomKit (currently disabled: `networking = false`) |
 | `pauseMenu.ts` | HTML overlay pause menu, toggled by Escape |
+| `debugRenderer.ts` | Jolt `DebugRendererJS` bridge — draws physics shapes as Three.js wireframes. F3 toggle. |
 
 ### Configuration / Constants
 
@@ -108,9 +109,9 @@ Character collision filters (reused every frame):
 - Pause menu (Escape)
 - Snowman decoration (visual only, no physics collider)
 - FPS counter HUD
+- Debug physics visualizer (F3 to toggle wireframe hitboxes for static bodies)
 - GitHub Actions deploy workflow
 
 ### Known Issues / Next Steps
 - Multiplayer (`NetworkManager` / PlayroomKit) is disabled (`networking = false`) and untested with Jolt
 - `EnvironmentObject.setPosition()` only updates the Three.js position — Jolt static bodies cannot be moved after creation; dynamic/kinematic bodies would need `bodyInterface.MoveKinematic()` or similar
-- No debug physics visualizer (Jolt has a debug renderer in C++ but not exposed in the JS bindings)

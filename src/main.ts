@@ -8,6 +8,7 @@ import { EnvironmentObject } from './environmentObject';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ConfigurableRenderer } from './renderer';
 import { Level } from './level';
+import { DebugRenderer } from './debugRenderer';
 
 async function init() {
     const clock = new THREE.Clock();
@@ -94,6 +95,22 @@ async function init() {
     const mainRenderer = new ConfigurableRenderer(level, mainCamera.camera, true);
     const miniMapRenderer = new ConfigurableRenderer(level, miniMapCamera.camera, false, 200, 200);
 
+    const debugRenderer = new DebugRenderer(
+        level,
+        mainCamera.camera,
+        mainRenderer.renderer,
+        level.physics.system
+    );
+    let debugEnabled = false;
+    debugRenderer.setVisible(false);
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'F3') {
+            e.preventDefault();
+            debugEnabled = !debugEnabled;
+            debugRenderer.setVisible(debugEnabled);
+        }
+    });
+
     Object.assign(miniMapRenderer.renderer.domElement.style, {
         position: 'fixed', top: '10px', right: '10px',
         width: '200px', height: '200px', zIndex: '1001',
@@ -130,6 +147,9 @@ async function init() {
 
         mainCamera.update();
         miniMapCamera.update();
+        if (debugEnabled) {
+            debugRenderer.render();
+        }
         miniMapRenderer.render();
         mainRenderer.render();
 

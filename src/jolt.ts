@@ -1,4 +1,4 @@
-import initJolt from 'jolt-physics/debug-wasm-compat';
+import initJolt from 'https://www.unpkg.com/jolt-physics/dist/jolt-physics.debug.wasm-compat.js';
 
 /**
  * Initialized Jolt module — shared singleton across the whole app.
