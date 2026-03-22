@@ -9,25 +9,27 @@ A browser-based 3D physics demo built with [Three.js](https://threejs.org/) and 
 The project uses a simple, direct architecture — no framework or event bus. A single async `init()` function in `main.ts` constructs all systems, then runs a `requestAnimationFrame` loop.
 
 ```
-main.ts  →  Level (Three.Scene + JoltInterface)
-         →  Player (Object3D + CharacterVirtual handle)
+main.ts  →  Level (Three.Scene + PhysicsWorld)
+         →  KinematicCharacter (move/jump API, hides Jolt filters/settings)
+         →  Player (Object3D, visual only)
          →  Cameras / Renderers / Input / PauseMenu
 ```
 
 **Physics data flow:**
 
 ```
-EnvironmentObject(geometry, halfExtents, pos)
-  → Level._createStaticBody()  → Jolt static body (LAYER_NON_MOVING)
+PhysicsWorld: owns JoltInterface, layers, filters, tempAllocator
+  → createStaticBody(halfExtents, pos)
+  → createCharacter(halfExtents, pos) → CharacterVirtual
 
-Player(size, pos)
-  → Level.addPlayer()  → Jolt CharacterVirtual (virtual, not a rigid body)
+Level(background, envObjects):
+  → creates PhysicsWorld, createStaticBody() for each EnvironmentObject
+  → addPlayer() creates CharacterVirtual, wraps in KinematicCharacter
 
 main.ts animate():
-  input → character.SetLinearVelocity()
-        → level.stepPhysics(dt)          // advances dynamic bodies
-        → character.ExtendedUpdate(dt)   // moves virtual character
-        → read character.GetPosition()   // sync Three.js player position
+  input → moveDir (from keys + player look)
+        → kinematicCharacter.update(dt, moveDir, jumpPressed)  // gravity, step, ExtendedUpdate
+        → kinematicCharacter.syncPositionTo(player.position)
 ```
 
 ---
@@ -38,9 +40,11 @@ main.ts animate():
 
 | File | Role |
 |---|---|
-| `main.ts` | Entry point — constructs all systems, runs the game loop |
-| `level.ts` | `THREE.Scene` subclass that owns the Jolt `JoltInterface` and `PhysicsSystem`; creates static environment bodies and the `CharacterVirtual` for the player |
-| `player.ts` | `THREE.Object3D` — box mesh, direction vectors, no Jolt objects (physics is owned by Level) |
+| `main.ts` | Entry point — constructs all systems, runs the game loop. Builds `moveDir` from keys, calls `kinematicCharacter.update()` and `syncPositionTo()`. |
+| `PhysicsWorld.ts` | Jolt lifecycle: object/broad-phase layers, filters, `createStaticBody`, `createCharacter`, `step()`. Owns all Jolt setup so Level stays scene-only. |
+| `KinematicCharacter.ts` | Wraps Jolt `CharacterVirtual` with `update(dt, moveDir, jumpPressed)` and `syncPositionTo()`. Hides Jolt filters, settings, Vec3 allocation, gravity/jump logic. |
+| `level.ts` | `THREE.Scene` subclass that creates `PhysicsWorld`, composes environment objects, and returns `KinematicCharacter` from `addPlayer()`. |
+| `player.ts` | `THREE.Object3D` — box mesh, direction vectors. No Jolt; movement driven by `KinematicCharacter`. |
 | `environmentObject.ts` | `THREE.Object3D` pairing a mesh with `halfExtents: THREE.Vector3` for Jolt box collider creation |
 | `camera.ts` | Factory functions: `thirdPersonCamera`, `topDownCameraFollow`, etc. via `ConfigurableCamera` |
 | `renderer.ts` | `THREE.WebGLRenderer` + `EffectComposer` wrapper; supports fullscreen or fixed-size viewports |
@@ -53,24 +57,19 @@ main.ts animate():
 
 | Value | Location | Purpose |
 |---|---|---|
-| `LAYER_NON_MOVING = 0` | `level.ts` | Jolt object layer for static environment |
-| `LAYER_MOVING = 1` | `level.ts` | Jolt object layer for character & dynamic objects |
-| `moveSpeed = 9` | `main.ts` | Player horizontal speed (units/sec) |
-| `jumpVelocity = 9` | `main.ts` | Player jump impulse (units/sec) |
-| `gravity = (0, -9.81, 0)` | `main.ts` | Gravity vector applied manually in JS each frame; **zero** gravity is passed to `CharacterVirtual.ExtendedUpdate` |
+| `LAYER_NON_MOVING = 0` | `PhysicsWorld.ts` | Jolt object layer for static environment |
+| `LAYER_MOVING = 1` | `PhysicsWorld.ts` | Jolt object layer for character & dynamic objects |
+| `moveSpeed`, `jumpVelocity`, `gravity` | `KinematicCharacter` | Configurable via constructor options (defaults: 24, 40, 200). Gravity applied in JS; zero passed to Jolt. |
 
 ---
 
 ## Scene Bootstrapping
 
-1. `init()` awaits `initJolt()` (loads the Jolt WASM binary).
+1. `init()` loads Jolt WASM via top-level await in `jolt.ts`.
 2. `EnvironmentObject` instances are created with plain `THREE.Vector3` half-extents — no physics objects yet.
-3. `new Level(Jolt, background, objects)`:
-   - Configures two Jolt object layers and two broad-phase layers.
-   - Creates a `JoltInterface` + `PhysicsSystem`.
-   - Calls `_createStaticBody()` for each `EnvironmentObject`, inserting Jolt static box bodies at their `THREE.Object3D.position`.
-4. `level.addPlayer(player)` creates a `CharacterVirtual` at the player's start position and returns it.
-5. Each frame: input → set character velocity → `level.stepPhysics(dt)` → `character.ExtendedUpdate(dt, gravity, ...)` → read `character.GetPosition()` back into `player.position`.
+3. `new Level(background, objects)` creates `PhysicsWorld` internally and calls `createStaticBody()` for each `EnvironmentObject`.
+4. `level.addPlayer(player)` adds player to scene, creates `CharacterVirtual` via `physicsWorld.createCharacter()`, wraps it in `KinematicCharacter`, returns the wrapper.
+5. Each frame: build `moveDir` from keys → `kinematicCharacter.update(dt, moveDir, jumpPressed)` → `kinematicCharacter.syncPositionTo(player.position)`.
 
 ---
 
@@ -93,6 +92,9 @@ Character collision filters (reused every frame):
 **ADR:** Switched from Rapier3D to Jolt Physics.  
 *Reason:* Jolt is actively maintained with a richer feature set (determinism, soft bodies, constraints) and the JS/WASM port (`jolt-physics` v1.x) has TypeScript types and a direct `CharacterVirtual` class that maps cleanly to the existing movement model.
 
+**ADR:** Extracted `PhysicsWorld` from `Level`.  
+*Reason:* Level is now a pure `THREE.Scene` for composition; PhysicsWorld owns all Jolt filters, layer config, and body creation. Enables swapping levels without mixing scene data with physics setup and simplifies debugging physics in isolation.
+
 ---
 
 ## Current State & Known Issues
@@ -109,7 +111,6 @@ Character collision filters (reused every frame):
 - GitHub Actions deploy workflow
 
 ### Known Issues / Next Steps
-- `renderer.ts` has two pre-existing unused imports (`BloomPass`, `FilmPass`) — harmless TS warnings
 - Multiplayer (`NetworkManager` / PlayroomKit) is disabled (`networking = false`) and untested with Jolt
 - `EnvironmentObject.setPosition()` only updates the Three.js position — Jolt static bodies cannot be moved after creation; dynamic/kinematic bodies would need `bodyInterface.MoveKinematic()` or similar
 - No debug physics visualizer (Jolt has a debug renderer in C++ but not exposed in the JS bindings)

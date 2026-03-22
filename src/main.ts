@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { Jolt } from './jolt';
 import { Player } from './player';
 import * as Cameras from './camera';
 import { MouseState, KeyboardState } from './input';
@@ -9,7 +8,6 @@ import { EnvironmentObject } from './environmentObject';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ConfigurableRenderer } from './renderer';
 import { Level } from './level';
-
 
 async function init() {
     const clock = new THREE.Clock();
@@ -48,7 +46,7 @@ async function init() {
         new THREE.Vector3(0, 4, -10)
     );
 
-    // 3. Scene / physics world
+    // 3. Physics world (Jolt) and scene (Level)
     const level = new Level(
         new THREE.Color(0x87ceeb),
         [floor, platform1, platform2, platform3, wall]
@@ -85,7 +83,10 @@ async function init() {
     const playerVelocity = new THREE.Vector3();
 
     const player = new Player(1, initialPlayerPosition, playerVelocity, mouseLook);
-    const { character } = level.addPlayer(player);
+    const { kinematicCharacter } = level.addPlayer(player);
+
+    const physicsSyncs: Array<() => void> = [];
+    physicsSyncs.push(() => kinematicCharacter.syncPositionTo(player.position));
 
     const mainCamera = Cameras.thirdPersonCamera(player);
     const miniMapCamera = Cameras.topDownCameraFollow(player);
@@ -105,24 +106,6 @@ async function init() {
     let lastTime = performance.now();
     let frames = 0;
 
-    // Movement constants — units per second
-    const GRAVITY = 200;
-    const moveSpeed = 24;
-    const jumpVelocity = 40;
-
-    // Jolt objects that are reused every frame — create once, never destroy
-    const zeroGravity = new Jolt.Vec3(0, 0, 0);
-    const bodyFilter = new Jolt.BodyFilter();
-    const shapeFilter = new Jolt.ShapeFilter();
-    const charUpdateSettings = new Jolt.ExtendedUpdateSettings();
-    // Snap-to-floor step (replaces Rapier's enableSnapToGround)
-    charUpdateSettings.mStickToFloorStepDown = new Jolt.Vec3(0, -0.1, 0);
-    // Stair step-up height (replaces Rapier's enableAutostep)
-    charUpdateSettings.mWalkStairsStepUp = new Jolt.Vec3(0, 0.4, 0);
-
-    // Vertical velocity tracked in JS — gravity applied manually, not inside Jolt
-    let verticalVelocity = 0;
-
     function animate() {
         requestAnimationFrame(animate);
         if (pauseMenu.getPaused()) return;
@@ -131,46 +114,14 @@ async function init() {
 
         player.updateLookFromState(mouseLook.lookState);
 
-        // ── Horizontal movement from input ────────────────────────────────────
         const moveDir = new THREE.Vector3();
         if (keys.state.KeyW) moveDir.addScaledVector(player.forwardDirection, 1);
         if (keys.state.KeyS) moveDir.addScaledVector(player.forwardDirection, -1);
         if (keys.state.KeyA) moveDir.addScaledVector(player.rightDirection, -1);
         if (keys.state.KeyD) moveDir.addScaledVector(player.rightDirection, 1);
-        moveDir.normalize().multiplyScalar(moveSpeed);
 
-        // ── Vertical velocity — gravity applied in JS, zero passed to Jolt ────
-        const isGrounded = character.GetGroundState() === Jolt.EGroundState_OnGround;
-        if (isGrounded) {
-            if (verticalVelocity < 0) verticalVelocity = 0;
-            if (keys.state['Space']) verticalVelocity = jumpVelocity;
-        } else {
-            verticalVelocity -= GRAVITY * deltaTime;
-        }
-
-        // Apply velocity to character
-        const newVel = new Jolt.Vec3(moveDir.x, verticalVelocity, moveDir.z);
-        character.SetLinearVelocity(newVel);
-        Jolt.destroy(newVel);
-
-        // ── Step rigid-body world, then update character ───────────────────────
-        level.stepPhysics(deltaTime);
-
-        // Gravity is managed in JS so we pass zero gravity to ExtendedUpdate
-        character.ExtendedUpdate(
-            deltaTime,
-            zeroGravity,
-            charUpdateSettings,
-            level.bpLayerFilter,
-            level.objLayerFilter,
-            bodyFilter,
-            shapeFilter,
-            level.tempAllocator
-        );
-
-        // ── Sync Three.js player position from character ───────────────────────
-        const pos = character.GetPosition();
-        player.position.set(pos.GetX(), pos.GetY(), pos.GetZ());
+        kinematicCharacter.update(deltaTime, moveDir, !!keys.state['Space']);
+        physicsSyncs.forEach(sync => sync());
 
         player.updateVisuals();
 
