@@ -184,7 +184,12 @@ async function init() {
         const { lookDirection, movementDirection, isJumping } = controlState;
 
         player.updateLookFromDirection(lookDirection);
-        kinematicCharacter.update(deltaTime, movementDirection, isJumping);
+        const roomSimTime = network?.getRoomSimulationTime();
+        let authoritativeSimTime: number | undefined;
+        if (network?.getIsReady() && !network.getIsHost() && roomSimTime !== undefined) {
+            authoritativeSimTime = roomSimTime;
+        }
+        kinematicCharacter.update(deltaTime, movementDirection, isJumping, authoritativeSimTime);
 
         physicsSyncs.forEach(sync => sync());
 
@@ -200,7 +205,11 @@ async function init() {
 
         player.updateVisuals();
 
-        network?.sendState(player.position, player.rotation.y);
+        network?.sendState(
+            player.position,
+            player.rotation.y,
+            network?.getIsHost() ? level.physics.getSimulationTime() : undefined
+        );
         network?.updateRemotePlayers();
 
         mainCamera.update();

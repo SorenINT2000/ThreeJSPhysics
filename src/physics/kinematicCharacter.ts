@@ -56,7 +56,12 @@ export class KinematicCharacter {
      * @param moveDir Normalized horizontal direction (-1..1). Will be scaled by moveSpeed.
      * @param jumpPressed True if jump key is pressed this frame.
      */
-    update(deltaTime: number, moveDir: THREE.Vector3, jumpPressed: boolean): void {
+    update(
+        deltaTime: number,
+        moveDir: THREE.Vector3,
+        jumpPressed: boolean,
+        authoritativeSimulationTime?: number
+    ): void {
         const horizontal = this.horizontalMove.copy(moveDir);
         if (horizontal.lengthSq() > 1e-10) {
             horizontal.normalize().multiplyScalar(this.moveSpeed);
@@ -76,7 +81,7 @@ export class KinematicCharacter {
         this.character.SetLinearVelocity(joltVel);
         Jolt.destroy(joltVel);
 
-        this.physicsWorld.step(deltaTime);
+        this.physicsWorld.step(deltaTime, authoritativeSimulationTime);
 
         this.character.ExtendedUpdate(
             deltaTime,

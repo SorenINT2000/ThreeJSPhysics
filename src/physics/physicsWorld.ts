@@ -105,7 +105,6 @@ export class PhysicsWorld {
         positionFn: (time: number) => THREE.Vector3
     ): void {
         const { x, y, z } = halfExtents;
-        console.log(halfExtents)
         const shape = new Jolt.BoxShape(new Jolt.Vec3(x, y, z), 0.05);
         const initialPosition = positionFn(this.currentTime);
 
@@ -159,13 +158,23 @@ export class PhysicsWorld {
         return character;
     }
 
+    /** Simulation clock used by kinematic movers (`positionFn(time)`). Host advances locally; clients override via `step(..., authoritativeTime)`. */
+    getSimulationTime(): number {
+        return this.currentTime;
+    }
+
     /**
      * Advance the physics simulation by deltaTime.
      * Clamped to 1/30 s to prevent the "spiral of death" on slow frames.
+     * @param authoritativeTime If set (e.g. from multiplayer host), replaces `currentTime` instead of advancing by `dt` — keeps kinematic platforms in sync.
      */
-    step(deltaTime: number): void {
+    step(deltaTime: number, authoritativeTime?: number): void {
         const dt = Math.min(deltaTime, 1 / 30);
-        this.currentTime += dt;
+        if (authoritativeTime !== undefined && Number.isFinite(authoritativeTime)) {
+            this.currentTime = authoritativeTime;
+        } else {
+            this.currentTime += dt;
+        }
         this.positionUpdaters.forEach((updater) => updater(dt));
         this.joltInterface.Step(dt, 1);
     }

@@ -1,11 +1,24 @@
 import * as THREE from 'three';
-import { insertCoin, myPlayer, onPlayerJoin, getParticipants, PlayerState as PlayroomPlayer, isHost, getRoomCode } from 'playroomkit';
+import {
+    insertCoin,
+    myPlayer,
+    onPlayerJoin,
+    getParticipants,
+    PlayerState as PlayroomPlayer,
+    isHost,
+    getRoomCode,
+    setState,
+    getState,
+} from 'playroomkit';
 
 export interface PlayerData {
     id: string;
     position: { x: number, y: number, z: number };
     rotation: number;
 }
+
+/** Room-level Playroom state key written by the host for kinematic world sync. */
+export const ROOM_STATE_SIM_TIME = 'simTime' as const;
 
 const SYNC_INTERVAL_MS = 3000;
 
@@ -99,11 +112,28 @@ export class NetworkManager {
         });
     }
 
-    public sendState(position: THREE.Vector3, rotation: number) {
+    /**
+     * Pushes local player pose. Host also writes room `simTime` so clients can drive kinematic platforms with the same clock.
+     */
+    public sendState(position: THREE.Vector3, rotation: number, simulationTime?: number) {
         const me = myPlayer();
         if (!this.isReady || !me) return;
         me.setState("pos", { x: position.x, y: position.y, z: position.z }, false);
         me.setState("rot", rotation, false);
+        if (isHost() && simulationTime !== undefined && Number.isFinite(simulationTime)) {
+            setState(ROOM_STATE_SIM_TIME, simulationTime, false);
+        }
+    }
+
+    /** Host-driven physics/simulation time from room state (undefined until first host update). */
+    public getRoomSimulationTime(): number | undefined {
+        if (!this.isReady) return undefined;
+        const t = getState(ROOM_STATE_SIM_TIME);
+        return typeof t === 'number' && Number.isFinite(t) ? t : undefined;
+    }
+
+    public getIsHost(): boolean {
+        return this.isReady && isHost();
     }
 
     /**

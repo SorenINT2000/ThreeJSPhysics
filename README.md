@@ -35,17 +35,19 @@ main.ts:      `isPaused` is the only pause flag; `setPaused` shows/hides menu, `
 
 ```
 PhysicsWorld: owns JoltInterface, layers, filters, tempAllocator
-  → createStaticBody(halfExtents, pos)
+  → createStaticCuboid(halfExtents, pos)
+  → createKinematicCuboid(halfExtents, positionFn) for moving platforms
   → createCharacter(halfExtents, pos) → CharacterVirtual
 
-Level(background, envObjects):
-  → creates PhysicsWorld, createStaticBody() for each EnvironmentObject
-  → addPlayer() creates CharacterVirtual, wraps in KinematicCharacter
+Level(background, rigidCuboids, kinematicCuboids):
+  → creates PhysicsWorld, static box per rigid cuboid, kinematic box per `MovingCuboid`
+  → spawn(player) creates CharacterVirtual, wraps in KinematicCharacter
 
 main.ts animate():
   controls.getState(dt) every frame (pause HUD + Escape when not eaten by browser)
         → pointerlockchange keeps pause in sync when the browser unlocks the pointer (Escape while captured)
-        → if !isPaused: lookDirection, movementDirection, isJumping → kinematicCharacter.update / syncPositionTo
+        → if !isPaused: lookDirection, movementDirection, isJumping → kinematicCharacter.update (optionally with host `simTime` on clients) / syncPositionTo
+        → NetworkManager: host writes room `simTime` with `PhysicsWorld.getSimulationTime()`; clients pass `getRoomSimulationTime()` into `step` so platform motion matches
 ```
 
 ---
@@ -58,8 +60,8 @@ main.ts animate():
 |---|---|
 | `main.ts` | Entry point — constructs all systems, runs the game loop. Uses `Controls.getState()` for input, calls `kinematicCharacter.update()` and `syncPositionTo()`. |
 | `physics/jolt.ts` | `await initJolt()` singleton; exports `Jolt` (runtime) and `JoltModule` (`Awaited<ReturnType<typeof initJolt>>`) for typings. The WASM `const` is not a TS `namespace`, so use `JoltModule["Quat"]`, `InstanceType<typeof Jolt.Quat>`, or `typeof Jolt.SomeClass.prototype` instead of `Jolt.Quat` as a type. |
-| `PhysicsWorld.ts` | Jolt lifecycle: object/broad-phase layers, filters, `createStaticBody`, `createCharacter`, `step()`. Owns all Jolt setup so Level stays scene-only. |
-| `KinematicCharacter.ts` | Wraps Jolt `CharacterVirtual` with `update(dt, moveDir, jumpPressed)` and `syncPositionTo()`. Reuses a `THREE.Vector3` for horizontal move (no `moveDir.clone()` per frame). |
+| `PhysicsWorld.ts` | Jolt lifecycle: object/broad-phase layers, filters, `createStaticCuboid`, `createKinematicCuboid`, `createCharacter`, `step(dt, authoritativeTime?)`, `getSimulationTime()`. Owns all Jolt setup so Level stays scene-only. |
+| `KinematicCharacter.ts` | Wraps Jolt `CharacterVirtual` with `update(dt, moveDir, jumpPressed, authoritativeSimTime?)` and `syncPositionTo()`. Reuses a `THREE.Vector3` for horizontal move (no `moveDir.clone()` per frame). |
 | `level.ts` | `THREE.Scene` subclass that creates `PhysicsWorld`, composes environment objects, and returns `KinematicCharacter` from `addPlayer()`. |
 | `player.ts` | `THREE.Object3D` — box mesh; world-space `lookDirection`; look line updated via local `BufferGeometry` (no `lookAt`). |
 | `environmentObject.ts` | `THREE.Object3D` pairing a mesh with `halfExtents: THREE.Vector3` for Jolt box collider creation |
@@ -71,7 +73,7 @@ main.ts animate():
 | `ui/debugUI.ts` + `ui/debugUI.css` | `DebugUI` — top-left overlay, `z-index: 1010` (above pause menu 1000 / mini-map 1001); `pointer-events: auto`; stops `mousedown`/`pointerdown` bubbling (same idea as pause UI) so `MouseState` does not request pointer lock when clicking the panel; Keyboard & Gamepad `<details>` closed by default; header + footer always visible |
 | `ui/pauseUI.ts` + `ui/pauseUI.css` | `PauseMenu` — overlay + resume callback. Pause vs running is only `isPaused` in `main.ts`; `setPaused` syncs menu and pointer lock. |
 | `lighting.ts` | `LightSource` — `DirectionalLight` with shadow config |
-| `network.ts` | `NetworkManager` wrapping PlayroomKit (currently disabled: `networking = false`) |
+| `network.ts` | `NetworkManager` — player `pos`/`rot` via `myPlayer().setState`; host writes room `simTime` (`ROOM_STATE_SIM_TIME`) for shared kinematic clock; `getRoomSimulationTime()`, `getIsHost()` |
 | `debugRenderer.ts` | Jolt `DebugRendererJS` bridge — draws physics shapes as Three.js wireframes. F3 toggle. |
 
 ### Configuration / Constants
@@ -88,9 +90,9 @@ main.ts animate():
 
 1. `init()` loads Jolt WASM via top-level await in `jolt.ts`.
 2. `EnvironmentObject` instances are created with plain `THREE.Vector3` half-extents — no physics objects yet.
-3. `new Level(background, objects)` creates `PhysicsWorld` internally and calls `createStaticBody()` for each `EnvironmentObject`.
-4. `level.addPlayer(player)` adds player to scene, creates `CharacterVirtual` via `physicsWorld.createCharacter()`, wraps it in `KinematicCharacter`, returns the wrapper.
-5. Each frame: `controls.getState(dt)`; if `togglePausePressed`, flip `isPaused` and update `PauseMenu`; if not paused, `player.updateLookFromDirection` → `kinematicCharacter.update` → `syncPositionTo`.
+3. `new Level(background, rigidCuboids, kinematicCuboids)` creates `PhysicsWorld` internally, static bodies for rigids, kinematic bodies for `MovingCuboid` instances.
+4. `level.spawn(player)` adds player to scene, creates `CharacterVirtual` via `physicsWorld.createCharacter()`, wraps it in `KinematicCharacter`, returns the wrapper.
+5. Each frame: `controls.getState(dt)`; if `togglePausePressed`, flip `isPaused` and update `PauseMenu`; if not paused, `player.updateLookFromDirection` → `kinematicCharacter.update` (clients use host `simTime` when networked) → `syncPositionTo` → `NetworkManager.sendState` (host pushes `simTime`).
 
 ---
 
@@ -127,7 +129,7 @@ Character collision filters (reused every frame):
 ## Current State & Known Issues
 
 ### Working
-- Static environment (floor, platforms, wall) with box colliders
+- Static environment (floor, platforms, wall) with box colliders; kinematic moving platforms (`MovingCuboid` + `createKinematicCuboid`)
 - Player movement (WASD + D-pad + left stick) and look (mouse + right stick) driven by `CharacterVirtual`
 - Jumping with mid-air gravity integration (via `ExtendedUpdate`)
 - Stair-step-up and snap-to-floor via `ExtendedUpdateSettings`
@@ -139,5 +141,5 @@ Character collision filters (reused every frame):
 - GitHub Actions deploy workflow
 
 ### Known Issues / Next Steps
-- Multiplayer (`NetworkManager` / PlayroomKit) is disabled (`networking = false`) and untested with Jolt
-- `EnvironmentObject.setPosition()` only updates the Three.js position — Jolt static bodies cannot be moved after creation; dynamic/kinematic bodies would need `bodyInterface.MoveKinematic()` or similar
+- Multiplayer: player pose + host `simTime` sync is implemented; latency/jitter on `simTime` can make moving platforms slightly lead/lag on clients until smoothed or predicted
+- `RigidCuboid` / static bodies: changing Three.js position after creation does not move Jolt static colliders; use kinematic bodies for movers
