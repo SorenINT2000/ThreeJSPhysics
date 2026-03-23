@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Player } from './player';
 import { Controls } from './controls';
 import { NetworkManager } from './network';
-import { EnvironmentObject } from './environmentObject';
+import { RigidCuboid } from './rigidCuboid';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Renderer, CameraPresets, Camera, DebugRenderer } from './rendering';
 import { Level } from './level';
@@ -15,7 +15,7 @@ async function init() {
 
     // 2. Environment objects: (geometry, halfExtents, position, material?)
     const floorSize = 20;
-    const floor = new EnvironmentObject(
+    const floor = new RigidCuboid(
         new THREE.BoxGeometry(floorSize * 2, 1, floorSize * 2),
         new THREE.Vector3(floorSize, 0.5, floorSize),
         new THREE.Vector3(0, 0, 0),
@@ -23,25 +23,25 @@ async function init() {
     );
     floor.mesh.receiveShadow = true;
 
-    const platform1 = new EnvironmentObject(
+    const platform1 = new RigidCuboid(
         new THREE.BoxGeometry(4, 0.2, 4),
         new THREE.Vector3(2, 0.1, 2),
         new THREE.Vector3(5, 1, 5)
     );
 
-    const platform2 = new EnvironmentObject(
+    const platform2 = new RigidCuboid(
         new THREE.BoxGeometry(4, 0.2, 4),
         new THREE.Vector3(2, 0.1, 2),
         new THREE.Vector3(0, 3, 8)
     );
 
-    const platform3 = new EnvironmentObject(
+    const platform3 = new RigidCuboid(
         new THREE.BoxGeometry(4, 0.2, 4),
         new THREE.Vector3(2, 0.1, 2),
         new THREE.Vector3(-4, 5, 4)
     );
 
-    const wall = new EnvironmentObject(
+    const wall = new RigidCuboid(
         new THREE.BoxGeometry(10, 8, 0.5),
         new THREE.Vector3(5, 4, 0.25),
         new THREE.Vector3(0, 4, -10)
@@ -114,7 +114,7 @@ async function init() {
     const miniMapCamera: Camera = CameraPresets.topDownCameraFollow(player);
 
 
-    const debugRenderer = new DebugRenderer(level.physicsWorld.system)
+    const debugRenderer = new DebugRenderer(level.physics.system)
     const mainRenderer = new Renderer(level, mainCamera, debugRenderer, true);
     const miniMapRenderer = new Renderer(level, miniMapCamera, debugRenderer, false, 200, 200);
 

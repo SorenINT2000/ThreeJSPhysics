@@ -1,16 +1,16 @@
 import * as THREE from 'three';
 import { PhysicsWorld, KinematicCharacter } from './physics';
-import { EnvironmentObject } from './environmentObject';
+import { RigidCuboid } from './rigidCuboid';
 import { Player } from './player';
 import { LightSource } from './lighting';
 
 class Level extends THREE.Scene {
-    public physicsWorld: PhysicsWorld;
-    private environmentObjects: Array<EnvironmentObject>;
+    private physicsWorld: PhysicsWorld;
+    private environmentObjects: Array<RigidCuboid>;
 
     constructor(
         background: THREE.Color | THREE.Texture | THREE.CubeTexture | null,
-        environmentObjects: Array<EnvironmentObject>
+        rigidCuboids: Array<RigidCuboid>
     ) {
         super();
 
@@ -22,7 +22,7 @@ class Level extends THREE.Scene {
 
         this.background = background;
 
-        this.environmentObjects = environmentObjects;
+        this.environmentObjects = rigidCuboids;
         this.environmentObjects.forEach(obj => {
             super.add(obj);
             this.physicsWorld.createStaticBody(obj.halfExtents, obj.position);
@@ -32,7 +32,7 @@ class Level extends THREE.Scene {
     }
 
     /** Dynamically add a static physics object to the scene at runtime. */
-    public addWithPhysics(object: EnvironmentObject): void {
+    public addWithPhysics(object: RigidCuboid): void {
         super.add(object);
         this.environmentObjects.push(object);
         this.physicsWorld.createStaticBody(object.halfExtents, object.position);

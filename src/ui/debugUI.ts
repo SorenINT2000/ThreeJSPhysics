@@ -25,23 +25,28 @@ function fmt(n: number, d: number): string {
     return n.toFixed(d);
 }
 
+type KeyCode = 'KeyW' | 'KeyA' | 'KeyS' | 'KeyD' | 'Space';
+
+
 /**
- * Fixed overlay: FPS, network id, visual keyboard, gamepad sticks & buttons, footer (pause, player pos, look/move/jump).
+ * Fixed overlay: header (always visible), accordion sections (keyboard / gamepad), footer.
  */
 export class DebugUI {
     private readonly root: HTMLDivElement;
-    private readonly fpsEl: HTMLSpanElement;
-    private readonly idEl: HTMLSpanElement;
-    private readonly lockDot: HTMLSpanElement;
-    private readonly keys: Record<'KeyW' | 'KeyA' | 'KeyS' | 'KeyD' | 'Space', HTMLDivElement>;
-    private readonly leftDot: HTMLDivElement;
-    private readonly rightDot: HTMLDivElement;
-    private readonly gpRoot: HTMLDivElement;
-    private readonly gpIdEl: HTMLSpanElement;
+    private fpsEl!: HTMLSpanElement;
+    private idEl!: HTMLSpanElement;
+    private lockDot!: HTMLSpanElement;
+
+    private readonly keys: Record<KeyCode, HTMLDivElement>;
+    private leftDot!: HTMLDivElement;
+    private rightDot!: HTMLDivElement;
+
+    private gpRoot!: HTMLDivElement;
+    private gpIdEl!: HTMLSpanElement;
     private readonly padBtns: Record<'PadUp' | 'PadDown' | 'PadLeft' | 'PadRight', HTMLDivElement>;
-    private readonly faceA: HTMLDivElement;
-    private readonly footerEl: HTMLDivElement;
-    /** Reused each frame to avoid allocating a new Set for gamepad button checks. */
+    private faceA!: HTMLDivElement;
+
+    private footerEl!: HTMLDivElement;
     private readonly pressedScratch = new Set<string>();
     private frames = 0;
     private lastFpsTime = performance.now();
@@ -50,69 +55,110 @@ export class DebugUI {
     constructor() {
         this.root = document.createElement('div');
         this.root.className = 'debug-ui';
+        Object.assign(this.root.style, {
+            position: 'fixed',
+            top: '10px',
+            left: '10px',
+            zIndex: '1010',
+            pointerEvents: 'auto',
+        });
 
+        this.keys = {} as Record<KeyCode, HTMLDivElement>;
+        this.padBtns = {} as DebugUI['padBtns'];
+
+        const stopBubble = (e: Event) => e.stopPropagation();
+        this.root.addEventListener('mousedown', stopBubble);
+        this.root.addEventListener('pointerdown', stopBubble);
+
+        this.root.append(
+            this.header(),
+            this.keyboard(),
+            this.gamepad(),
+            this.footer(),
+        );
+        document.body.appendChild(this.root);
+    }
+
+    /** Top row: FPS, network id, paused indicator (always visible). */
+    private header(): HTMLElement {
         const header = document.createElement('div');
         header.className = 'debug-ui__header';
+
         this.fpsEl = document.createElement('strong');
         this.fpsEl.textContent = 'FPS: —';
+
         const idWrap = document.createElement('span');
         idWrap.className = 'debug-ui__id-wrap';
         idWrap.append('ID: ');
         this.idEl = document.createElement('span');
         this.idEl.textContent = '—';
         idWrap.appendChild(this.idEl);
+
         const lockWrap = document.createElement('span');
         lockWrap.className = 'debug-ui__lock';
         this.lockDot = document.createElement('span');
         this.lockDot.className = 'debug-ui__lock-dot';
         lockWrap.append(this.lockDot, document.createTextNode(' paused'));
+
         header.append(this.fpsEl, idWrap, lockWrap);
+        return header;
+    }
 
-        const body = document.createElement('div');
-        body.className = 'debug-ui__body';
+    /** Collapsible WASD + Space visualizer. */
+    private keyboard(): HTMLElement {
+        const details = document.createElement('details');
+        details.className = 'debug-ui__accordion-section';
 
-        const kbdCol = document.createElement('div');
-        const kbdTitle = document.createElement('div');
-        kbdTitle.className = 'debug-ui__section-title';
-        kbdTitle.textContent = 'Keyboard';
+        const summary = document.createElement('summary');
+        summary.className = 'debug-ui__accordion-summary';
+        summary.textContent = 'Keyboard';
+
         const kbd = document.createElement('div');
         kbd.className = 'debug-ui__kbd';
 
-        const mkKey = (code: 'KeyW' | 'KeyA' | 'KeyS' | 'KeyD' | 'Space', label: string, wide = false) => {
+        const keys = document.createElement('div');
+        keys.className = 'debug-ui__keys'
+
+        const mkKey = (code: KeyCode, label: string, wide = false) => {
             const d = document.createElement('div');
             d.className = 'debug-ui__key' + (wide ? ' debug-ui__key--wide' : '');
             d.dataset.key = code;
             d.textContent = label;
+            this.keys[code] = d;
             return d;
-        };
-
-        this.keys = {
-            KeyW: mkKey('KeyW', 'W'),
-            KeyA: mkKey('KeyA', 'A'),
-            KeyS: mkKey('KeyS', 'S'),
-            KeyD: mkKey('KeyD', 'D'),
-            Space: mkKey('Space', 'Space', true),
         };
 
         const rowW = document.createElement('div');
         rowW.className = 'debug-ui__key-row';
-        rowW.appendChild(this.keys.KeyW);
+        rowW.appendChild(mkKey('KeyW', 'W'));
         const rowASD = document.createElement('div');
         rowASD.className = 'debug-ui__key-row';
-        rowASD.append(this.keys.KeyA, this.keys.KeyS, this.keys.KeyD);
+        rowASD.append(mkKey('KeyA', 'A'), mkKey('KeyS', 'S'), mkKey('KeyD', 'D'));
         const rowSp = document.createElement('div');
         rowSp.className = 'debug-ui__key-row';
-        rowSp.appendChild(this.keys.Space);
-        kbd.append(rowW, rowASD, rowSp);
-        kbdCol.append(kbdTitle, kbd);
+        rowSp.appendChild(mkKey('Space', 'Space', true));
+        keys.append(rowW, rowASD, rowSp)
+        kbd.append(keys);
+
+        details.append(summary, kbd);
+        return details;
+    }
+
+    /** Collapsible sticks, D-pad, jump button. */
+    private gamepad(): HTMLElement {
+        const details = document.createElement('details');
+        details.className = 'debug-ui__accordion-section';
+
+        const summary = document.createElement('summary');
+        summary.className = 'debug-ui__accordion-summary';
+        summary.textContent = 'Gamepad  ';
+
+        this.gpIdEl = document.createElement('span');
+        this.gpIdEl.className = 'debug-ui__gp-id';
+        summary.append(this.gpIdEl);
 
         this.gpRoot = document.createElement('div');
         this.gpRoot.className = 'debug-ui__gp';
-        const gpTitle = document.createElement('div');
-        gpTitle.className = 'debug-ui__section-title';
-        gpTitle.textContent = 'Gamepad';
-        this.gpIdEl = document.createElement('div');
-        this.gpIdEl.className = 'debug-ui__gp-id';
 
         const sticks = document.createElement('div');
         sticks.className = 'debug-ui__sticks';
@@ -140,11 +186,12 @@ export class DebugUI {
         gpBtns.className = 'debug-ui__gp-buttons';
         const dpad = document.createElement('div');
         dpad.className = 'debug-ui__dpad';
+
         const mkPadCell = (
             name: 'PadUp' | 'PadDown' | 'PadLeft' | 'PadRight' | null,
             sym: string,
             row: number,
-            col: number
+            col: number,
         ) => {
             const cell = document.createElement('div');
             cell.className = 'debug-ui__dpad-cell';
@@ -156,26 +203,19 @@ export class DebugUI {
                 b.dataset.pad = name;
                 b.textContent = sym;
                 cell.appendChild(b);
+                this.padBtns[name] = b;
             }
             dpad.appendChild(cell);
-            return name ? (cell.querySelector('[data-pad]') as HTMLDivElement) : null;
         };
         mkPadCell(null, '', 1, 1);
-        const padUp = mkPadCell('PadUp', '▲', 1, 2);
+        mkPadCell('PadUp', '▲', 1, 2);
         mkPadCell(null, '', 1, 3);
-        const padLeft = mkPadCell('PadLeft', '◀', 2, 1);
+        mkPadCell('PadLeft', '◀', 2, 1);
         mkPadCell(null, '', 2, 2);
-        const padRight = mkPadCell('PadRight', '▶', 2, 3);
+        mkPadCell('PadRight', '▶', 2, 3);
         mkPadCell(null, '', 3, 1);
-        const padDown = mkPadCell('PadDown', '▼', 3, 2);
+        mkPadCell('PadDown', '▼', 3, 2);
         mkPadCell(null, '', 3, 3);
-
-        this.padBtns = {
-            PadUp: padUp!,
-            PadDown: padDown!,
-            PadLeft: padLeft!,
-            PadRight: padRight!,
-        };
 
         const face = document.createElement('div');
         face.className = 'debug-ui__face';
@@ -189,25 +229,28 @@ export class DebugUI {
         face.append(faceLabel, this.faceA);
 
         gpBtns.append(dpad, face);
-        this.gpRoot.append(gpTitle, this.gpIdEl, sticks, gpBtns);
+        this.gpRoot.append(sticks, gpBtns);
 
-        body.append(kbdCol, this.gpRoot);
+        details.append(summary, this.gpRoot);
+        return details;
+    }
 
+    /** Vectors / numeric debug (always visible). */
+    private footer(): HTMLElement {
         this.footerEl = document.createElement('div');
         this.footerEl.className = 'debug-ui__footer';
-
-        this.root.append(header, body, this.footerEl);
-        Object.assign(this.root.style, {
-            position: 'fixed',
-            top: '10px',
-            left: '10px',
-            pointerEvents: 'none',
-            zIndex: '1000',
-        });
-        document.body.appendChild(this.root);
+        return this.footerEl;
     }
 
     update(frame: DebugUIFrame): void {
+        this.tickFps();
+        this.updateHeader(frame);
+        this.updateKeyboard(frame.control.debug.keyboard);
+        this.updateGamepad(frame.control.debug.gamepad);
+        this.updateFooter(frame);
+    }
+
+    private tickFps(): void {
         const now = performance.now();
         this.frames++;
         if (now - this.lastFpsTime >= 1000) {
@@ -215,23 +258,24 @@ export class DebugUI {
             this.frames = 0;
             this.lastFpsTime = now;
         }
+    }
 
-        const c = frame.control;
-        const d = c.debug;
+    private updateHeader(frame: DebugUIFrame): void {
         const nid = frame.networkId;
-
         this.fpsEl.textContent = `FPS: ${this.fps}`;
         this.idEl.textContent = nid != null && nid !== '' ? nid : '—';
         this.lockDot.classList.toggle('debug-ui__lock-dot--on', frame.isPaused);
+    }
 
-        const kb = d.keyboard;
+    private updateKeyboard(kb: ControlState['debug']['keyboard']): void {
         this.keys.KeyW.classList.toggle('debug-ui__key--pressed', kb.KeyW);
         this.keys.KeyA.classList.toggle('debug-ui__key--pressed', kb.KeyA);
         this.keys.KeyS.classList.toggle('debug-ui__key--pressed', kb.KeyS);
         this.keys.KeyD.classList.toggle('debug-ui__key--pressed', kb.KeyD);
         this.keys.Space.classList.toggle('debug-ui__key--pressed', kb.Space);
+    }
 
-        const gp = d.gamepad;
+    private updateGamepad(gp: ControlState['debug']['gamepad']): void {
         this.gpRoot.classList.toggle('debug-ui__gp--disconnected', !gp.connected);
         this.gpIdEl.textContent = gp.connected
             ? gp.id
@@ -254,7 +298,11 @@ export class DebugUI {
         this.padBtns.PadLeft.classList.toggle('debug-ui__padbtn--pressed', pressed.has('PadLeft'));
         this.padBtns.PadRight.classList.toggle('debug-ui__padbtn--pressed', pressed.has('PadRight'));
         this.faceA.classList.toggle('debug-ui__face-a--pressed', pressed.has('ButtonA'));
+    }
 
+    private updateFooter(frame: DebugUIFrame): void {
+        const c = frame.control;
+        const d = c.debug;
         const ld = c.lookDirection;
         const md = c.movementDirection;
         const p = frame.playerPosition;
@@ -264,7 +312,7 @@ export class DebugUI {
             `look <span class="debug-ui__footer-accent">${fmt(ld.x, 2)}, ${fmt(ld.y, 2)}, ${fmt(ld.z, 2)}</span>`,
             `move <span class="debug-ui__footer-accent">${fmt(md.x, 2)}, ${fmt(md.y, 2)}, ${fmt(md.z, 2)}</span>`,
             `jump: ${c.isJumping ? 'yes' : 'no'}`,
-        ].join(' · ');
+        ].join('<br/>');
     }
 
     dispose(): void {

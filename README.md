@@ -67,7 +67,7 @@ main.ts animate():
 | `input.ts` | `LookController` (mouse + gamepad look), `MouseState` (pointer-lock + forwards to LookController), `KeyboardState`, `GamepadState` |
 | `controls.ts` | `Controls` — single interface: instantiates input states, combines them each frame, returns `{ lookDirection, movementDirection, isJumping, togglePausePressed, debug }` (`Escape` edge via `KeyboardState`) |
 | `ui/index.ts` | Barrel re-exports `DebugUI` and `PauseMenu` for `import { … } from './ui'`. |
-| `ui/debugUI.ts` + `ui/debugUI.css` | `DebugUI` — top-left overlay; header dot reflects `isPaused` (same as pause/menu state); footer: player `x,y,z`, look/move/jump |
+| `ui/debugUI.ts` + `ui/debugUI.css` | `DebugUI` — top-left overlay, `z-index: 1010` (above pause menu 1000 / mini-map 1001); `pointer-events: auto`; stops `mousedown`/`pointerdown` bubbling (same idea as pause UI) so `MouseState` does not request pointer lock when clicking the panel; Keyboard & Gamepad `<details>` closed by default; header + footer always visible |
 | `ui/pauseUI.ts` + `ui/pauseUI.css` | `PauseMenu` — overlay + resume callback. Pause vs running is only `isPaused` in `main.ts`; `setPaused` syncs menu and pointer lock. |
 | `lighting.ts` | `LightSource` — `DirectionalLight` with shadow config |
 | `network.ts` | `NetworkManager` wrapping PlayroomKit (currently disabled: `networking = false`) |

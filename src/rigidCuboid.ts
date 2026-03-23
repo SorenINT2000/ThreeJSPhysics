@@ -13,9 +13,8 @@ const defaultMaterial = new THREE.MeshPhysicalMaterial({
     clearcoatRoughness: 0
 });
 
-export class EnvironmentObject extends THREE.Object3D {
+export class RigidCuboid extends THREE.Object3D {
     public mesh: THREE.Mesh;
-    /** Half-extents of the box collider (x, y, z). */
     public halfExtents: THREE.Vector3;
 
     constructor(
@@ -33,8 +32,8 @@ export class EnvironmentObject extends THREE.Object3D {
         this.add(this.mesh);
         this.halfExtents = halfExtents;
 
-        if (!position) return;
-        this.position.copy(position);
+        if (position)
+            this.position.copy(position);
     }
 
     public setPosition(newPos: THREE.Vector3) {
