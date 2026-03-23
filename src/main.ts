@@ -204,11 +204,8 @@ async function init() {
                 player.playerDead = false;
             }
             player.updateVisuals();
-        } else {
-            const platformTime =
-                network?.getIsReady() && !network.getIsHost()
-                    ? (network.getRoomSimulationTime() ?? level.physics.getSimulationTime() + deltaTime)
-                    : level.physics.getSimulationTime() + deltaTime;
+        } else if (network?.getIsReady() && !network.getIsHost()) {
+            const platformTime = network.getRoomSimulationTime() ?? level.physics.getSimulationTime();
             level.physics.updateMovingPlatforms(platformTime, deltaTime);
         }
 
