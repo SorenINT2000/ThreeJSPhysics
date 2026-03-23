@@ -40,6 +40,11 @@
   color: var(--dbg-muted);
 }
 
+.debug-ui__wasm-heap {
+  color: var(--dbg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .debug-ui__lock {
   display: inline-flex;
   align-items: center;

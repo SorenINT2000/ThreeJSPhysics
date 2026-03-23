@@ -3,14 +3,17 @@ import { PhysicsWorld, KinematicCharacter } from './physics';
 import { RigidCuboid } from './rigidCuboid';
 import { Player } from './player';
 import { LightSource } from './lighting';
+import { MovingCuboid } from './movingCuboid';
 
 class Level extends THREE.Scene {
     private physicsWorld: PhysicsWorld;
-    private environmentObjects: Array<RigidCuboid>;
+    private staticCuboids: Array<RigidCuboid>;
+    private kinematicCuboids: Array<MovingCuboid>;
 
     constructor(
         background: THREE.Color | THREE.Texture | THREE.CubeTexture | null,
-        rigidCuboids: Array<RigidCuboid>
+        rigidCuboids: Array<RigidCuboid>,
+        kinematicCuboids: Array<MovingCuboid>,
     ) {
         super();
 
@@ -22,20 +25,19 @@ class Level extends THREE.Scene {
 
         this.background = background;
 
-        this.environmentObjects = rigidCuboids;
-        this.environmentObjects.forEach(obj => {
+        this.staticCuboids = rigidCuboids;
+        this.staticCuboids.forEach(obj => {
             super.add(obj);
-            this.physicsWorld.createStaticBody(obj.halfExtents, obj.position);
+            this.physicsWorld.createStaticCuboid(obj.halfExtents, obj.position);
+        });
+
+        this.kinematicCuboids = kinematicCuboids;
+        this.kinematicCuboids.forEach(obj => {
+            super.add(obj);
+            this.physicsWorld.createKinematicCuboid(obj.halfExtents, obj.positionFn);
         });
 
         this.addFloor(-15);
-    }
-
-    /** Dynamically add a static physics object to the scene at runtime. */
-    public addWithPhysics(object: RigidCuboid): void {
-        super.add(object);
-        this.environmentObjects.push(object);
-        this.physicsWorld.createStaticBody(object.halfExtents, object.position);
     }
 
     public addFloor(yLevel: number): void {
@@ -44,7 +46,6 @@ class Level extends THREE.Scene {
         const floorObject = new THREE.Mesh(floorGeom, material)
         super.add(floorObject)
         floorObject.position.setY(yLevel);
-        // this.physicsWorld.createFloor(yLevel);
     }
 
     /**

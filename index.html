@@ -6,6 +6,12 @@
     <title>Three.js + Jolt</title>
     <style>
       body { margin: 0; overflow: hidden; background: #000; }
+      canvas {
+        image-rendering: pixelated;
+        image-rendering: -moz-crisp-edges; /* Firefox */
+        image-rendering: -webkit-crisp-edges; /* Webkit */
+        image-rendering: crisp-edges; /* Standard */
+      }
     </style>
   </head>
   <body>

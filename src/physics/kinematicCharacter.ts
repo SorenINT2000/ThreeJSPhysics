@@ -96,7 +96,31 @@ export class KinematicCharacter {
         target.set(pos.GetX(), pos.GetY(), pos.GetZ());
     }
 
+    /** Copy current velocity into the target Vector3. */
+    syncVelocityTo(target: THREE.Vector3): void {
+        const vel = this.character.GetLinearVelocity();
+        target.set(vel.GetX(), vel.GetY(), vel.GetZ());
+    }
+
+    /**
+     * Teleport the character. Resets accumulated vertical speed used by `update()` so a long
+     * fall does not carry over — call `setVelocity` after this if you want a non-zero Y speed.
+     */
     setPosition(x: number, y: number, z: number): void {
-        this.character.SetPosition(new Jolt.RVec3(x, y, z));
+        const p = new Jolt.RVec3(x, y, z);
+        this.character.SetPosition(p);
+        Jolt.destroy(p);
+        this.verticalVelocity = 0;
+    }
+
+    /**
+     * Sets Jolt linear velocity and syncs the internal vertical component that `update()` applies
+     * each frame (otherwise `SetLinearVelocity` would be overwritten immediately).
+     */
+    setVelocity(x: number, y: number, z: number): void {
+        const v = new Jolt.Vec3(x, y, z);
+        this.character.SetLinearVelocity(v);
+        Jolt.destroy(v);
+        this.verticalVelocity = y;
     }
 }

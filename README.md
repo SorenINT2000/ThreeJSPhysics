@@ -57,6 +57,7 @@ main.ts animate():
 | File | Role |
 |---|---|
 | `main.ts` | Entry point — constructs all systems, runs the game loop. Uses `Controls.getState()` for input, calls `kinematicCharacter.update()` and `syncPositionTo()`. |
+| `physics/jolt.ts` | `await initJolt()` singleton; exports `Jolt` (runtime) and `JoltModule` (`Awaited<ReturnType<typeof initJolt>>`) for typings. The WASM `const` is not a TS `namespace`, so use `JoltModule["Quat"]`, `InstanceType<typeof Jolt.Quat>`, or `typeof Jolt.SomeClass.prototype` instead of `Jolt.Quat` as a type. |
 | `PhysicsWorld.ts` | Jolt lifecycle: object/broad-phase layers, filters, `createStaticBody`, `createCharacter`, `step()`. Owns all Jolt setup so Level stays scene-only. |
 | `KinematicCharacter.ts` | Wraps Jolt `CharacterVirtual` with `update(dt, moveDir, jumpPressed)` and `syncPositionTo()`. Reuses a `THREE.Vector3` for horizontal move (no `moveDir.clone()` per frame). |
 | `level.ts` | `THREE.Scene` subclass that creates `PhysicsWorld`, composes environment objects, and returns `KinematicCharacter` from `addPlayer()`. |
@@ -133,7 +134,7 @@ Character collision filters (reused every frame):
 - Third-person + mini-map orthographic cameras
 - Pause menu: `isPaused` drives menu + lock (`setPaused`); browser Escape unlocks pointer → `pointerlockchange` pauses; Escape also toggles via `Controls` when the key event is delivered (e.g. gamepad / already unlocked). The pause overlay stops `mousedown`/`pointerdown` bubbling so `MouseState`’s window listener cannot grab pointer lock before the Resume `click` fires.
 - Snowman decoration (visual only, no physics collider)
-- FPS + visual input HUD (`DebugUI`: keys, stick gauges, gamepad buttons, compact vectors)
+- FPS + visual input HUD (`DebugUI`: keys, stick gauges, gamepad buttons, compact vectors, Jolt WASM heap used/total via `PhysicsWorld.getWasmHeapStats()`)
 - Debug physics visualizer (F3 to toggle wireframe hitboxes for static bodies)
 - GitHub Actions deploy workflow
 

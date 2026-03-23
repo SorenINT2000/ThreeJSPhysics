@@ -33,7 +33,7 @@ class Player extends Object3D {
         this.playerMesh.castShadow = true;
 
         this.position.copy(position);
-        this.velocity = velocity;
+        this.velocity = new THREE.Vector3().copy(velocity);
         this.lookDirection.set(0, 0, 1);
         this.forwardDirection.copy(this.lookDirection).setY(0).normalize();
         this.rightDirection.set(-this.forwardDirection.z, 0, this.forwardDirection.x);

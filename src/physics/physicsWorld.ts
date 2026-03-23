@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Jolt } from './jolt';
+import { Jolt, type JoltModule } from './jolt';
 
 // Object layers: static world vs. dynamic/moving objects
 export const LAYER_NON_MOVING = 0;
@@ -28,6 +28,11 @@ export class PhysicsWorld {
     private joltInterface: typeof Jolt.JoltInterface.prototype;
     private objectFilter: typeof Jolt.ObjectLayerPairFilterTable.prototype;
     private bpInterface: typeof Jolt.BroadPhaseLayerInterfaceTable.prototype;
+
+    private currentTime: number = 0;
+    private identityQuat: InstanceType<JoltModule['Quat']> = Jolt.Quat.prototype.sIdentity();
+    /** Per-frame kinematic sync; each entry owns a long-lived `RVec3` (no per-frame alloc). */
+    private positionUpdaters: Array<(dt: number) => void> = [];
 
     constructor() {
         // Which object layers can collide with each other
@@ -64,10 +69,23 @@ export class PhysicsWorld {
     }
 
     /**
+     * Emscripten linear memory stats exposed by Jolt (`HEAP8.length` and dlmalloc `mallinfo` free estimate).
+     */
+    getWasmHeapStats(): { totalBytes: number; freeBytes: number; usedBytesApprox: number } {
+        const totalBytes = this.joltInterface.sGetTotalMemory();
+        const freeBytes = this.joltInterface.sGetFreeMemory();
+        return {
+            totalBytes,
+            freeBytes,
+            usedBytesApprox: Math.max(0, totalBytes - freeBytes),
+        };
+    }
+
+    /**
      * Create a static box body and add it to the world.
      * Owns all Jolt allocations — caller does not need to destroy.
      */
-    createStaticBody(halfExtents: THREE.Vector3, position: THREE.Vector3): void {
+    createStaticCuboid(halfExtents: THREE.Vector3, position: THREE.Vector3): void {
         const { x, y, z } = halfExtents;
         const shape = new Jolt.BoxShape(new Jolt.Vec3(x, y, z), 0.05);
         const bodySettings = new Jolt.BodyCreationSettings(
@@ -82,68 +100,34 @@ export class PhysicsWorld {
         this.bodyInterface.AddBody(body.GetID(), Jolt.EActivation_DontActivate);
     }
 
-    // createFloor(yLevel: number): void {
-    //     const plane_shape = new Jolt.PlaneShape(new Jolt.Plane(new Jolt.Vec3(0, 1, 0), 0));
-    //     // const shape_settings = new Jolt.ShapeSettings(); // Optional, or use shape directly
-    //     const body_settings = new Jolt.BodyCreationSettings(
-    //         plane_shape, 
-    //         new Jolt.RVec3(0, yLevel, 0),     // Position
-    //         Jolt.Quat.prototype.sIdentity(), // Rotation
-    //         Jolt.EMotionType_Static,    // Motion Type (Static = immovable)
-    //         LAYER_NON_MOVING            // Your defined collision layer
-    //     );
-    //     const body = this.bodyInterface.CreateBody(body_settings);
-    //     Jolt.destroy(body_settings);
-    //     this.bodyInterface.AddBody(body.GetID(), Jolt.EActivation_DontActivate)
+    createKinematicCuboid(
+        halfExtents: THREE.Vector3,
+        positionFn: (time: number) => THREE.Vector3
+    ): void {
+        const { x, y, z } = halfExtents;
+        console.log(halfExtents)
+        const shape = new Jolt.BoxShape(new Jolt.Vec3(x, y, z), 0.05);
+        const initialPosition = positionFn(this.currentTime);
 
-    //     // Register the player contact activation listener
+        const bodySettings = new Jolt.BodyCreationSettings(
+            shape,
+            new Jolt.RVec3(initialPosition.x, initialPosition.y, initialPosition.z),
+            Jolt.Quat.prototype.sIdentity(),
+            Jolt.EMotionType_Kinematic,
+            LAYER_MOVING
+        );
+        const body = this.bodyInterface.CreateBody(bodySettings);
+        Jolt.destroy(bodySettings);
 
-    //     const activationListener = new Jolt.BodyActivationListenerJS;
-    //     activationListener.OnBodyActivated = (bodyId, userData) => {
-    //         bodyId = Jolt.wrapPointer(bodyId, Jolt.BodyID);
-    //         console.log('OnBodyActivated ' + bodyId.GetIndex() + ' ' + userData);
-    //     };
-    //     activationListener.OnBodyDeactivated = (bodyId, userData) => {
-    //         bodyId = Jolt.wrapPointer(bodyId, Jolt.BodyID);
-    //         console.log('OnBodyDeactivated ' + bodyId.GetIndex() + ' ' + userData);
-    //     };
-    //     this.system.SetBodyActivationListener(activationListener);
-
-
-    //     const contactListener = new Jolt.CharacterContactListenerJS();
-    //     contactListener.OnContactValidate = (inCharacter: number, inBodyID2: number, inSubShapeID2: number) => {
-    //         body1 = Jolt.wrapPointer(body1, Jolt.Body).GetID().GetIndex();
-    //         body2 = Jolt.wrapPointer(body2, Jolt.Body).GetID().GetIndex();
-    //         collideShapeResult = Jolt.wrapPointer(collideShapeResult, Jolt.CollideShapeResult).m;
-    //         console.log('OnContactValidate ' + body1 + ' ' + body2 + ' ' + collideShapeResult.mPenetrationAxis.ToString());
-    //         return Jolt.ValidateResult_AcceptAllContactsForThisBodyPair;
-    //     };
-    //     contactListener.OnContactAdded = (body1, body2, manifold, settings) => {
-    //         body1 = Jolt.wrapPointer(body1, Jolt.Body);
-    //         body2 = Jolt.wrapPointer(body2, Jolt.Body);
-    //         manifold = Jolt.wrapPointer(manifold, Jolt.ContactManifold);
-    //         settings = Jolt.wrapPointer(settings, Jolt.ContactSettings);
-    //         console.log('OnContactAdded ' + body1.GetID().GetIndex() + ' ' + body2.GetID().GetIndex() + ' ' + manifold.mWorldSpaceNormal.ToString());
-
-    //         // Override the restitution to 0.5
-    //         settings.mCombinedRestitution = 0.5;
-    //     };
-    //     contactListener.OnContactPersisted = (body1, body2, manifold, settings) => {
-    //         body1 = Jolt.wrapPointer(body1, Jolt.Body);
-    //         body2 = Jolt.wrapPointer(body2, Jolt.Body);
-    //         manifold = Jolt.wrapPointer(manifold, Jolt.ContactManifold);
-    //         settings = Jolt.wrapPointer(settings, Jolt.ContactSettings);
-    //         console.log('OnContactPersisted ' + body1.GetID().GetIndex() + ' ' + body2.GetID().GetIndex() + ' ' + manifold.mWorldSpaceNormal.ToString());
-
-    //         // Override the restitution to 0.5
-    //         settings.mCombinedRestitution = 0.5;
-    //     };
-    //     contactListener.OnContactRemoved = (subShapePair) => {
-    //         subShapePair = Jolt.wrapPointer(subShapePair, Jolt.SubShapeIDPair);
-    //         console.log('OnContactRemoved ' + subShapePair.GetBody1ID().GetIndex() + ' ' + subShapePair.GetBody2ID().GetIndex());
-    //     };
-    //     this.system.SetContactListener(contactListener);
-    // }
+        const bodyID = body.GetID();
+        const joltPos = new Jolt.RVec3();
+        this.positionUpdaters.push((dt: number) => {
+            const p = positionFn(this.currentTime);
+            joltPos.Set(p.x, p.y, p.z);
+            this.bodyInterface.MoveKinematic(bodyID, joltPos, this.identityQuat, dt);
+        });
+        this.bodyInterface.AddBody(bodyID, Jolt.EActivation_Activate);
+    }
 
     /**
      * Create and return a CharacterVirtual. Caller must update it each frame via
@@ -180,6 +164,9 @@ export class PhysicsWorld {
      * Clamped to 1/30 s to prevent the "spiral of death" on slow frames.
      */
     step(deltaTime: number): void {
-        this.joltInterface.Step(Math.min(deltaTime, 1 / 30), 1);
+        const dt = Math.min(deltaTime, 1 / 30);
+        this.currentTime += dt;
+        this.positionUpdaters.forEach((updater) => updater(dt));
+        this.joltInterface.Step(dt, 1);
     }
 }

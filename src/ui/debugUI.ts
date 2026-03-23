@@ -7,6 +7,9 @@ export interface DebugUIFrame {
     isPaused: boolean;
     /** World-space player position (same as `Player` / kinematic sync target). */
     playerPosition: { x: number; y: number; z: number };
+    playerVelocity: { x: number; y: number; z: number };
+    /** Jolt WASM linear memory (see `PhysicsWorld.getWasmHeapStats`). */
+    wasmHeap: { totalBytes: number; freeBytes: number; usedBytesApprox: number };
 }
 
 const STICK_TRAVEL_PX = 20;
@@ -25,6 +28,13 @@ function fmt(n: number, d: number): string {
     return n.toFixed(d);
 }
 
+function formatBytes(n: number): string {
+    if (n >= 1e9) return `${(n / 1e9).toFixed(2)} GB`;
+    if (n >= 1e6) return `${(n / 1e6).toFixed(2)} MB`;
+    if (n >= 1e3) return `${(n / 1e3).toFixed(1)} kB`;
+    return `${Math.round(n)} B`;
+}
+
 type KeyCode = 'KeyW' | 'KeyA' | 'KeyS' | 'KeyD' | 'Space';
 
 
@@ -36,6 +46,7 @@ export class DebugUI {
     private fpsEl!: HTMLSpanElement;
     private idEl!: HTMLSpanElement;
     private lockDot!: HTMLSpanElement;
+    private wasmHeapEl!: HTMLSpanElement;
 
     private readonly keys: Record<KeyCode, HTMLDivElement>;
     private leftDot!: HTMLDivElement;
@@ -100,7 +111,10 @@ export class DebugUI {
         this.lockDot.className = 'debug-ui__lock-dot';
         lockWrap.append(this.lockDot, document.createTextNode(' paused'));
 
-        header.append(this.fpsEl, idWrap, lockWrap);
+        this.wasmHeapEl = document.createElement('span');
+        this.wasmHeapEl.className = 'debug-ui__wasm-heap';
+
+        header.append(this.fpsEl, idWrap, lockWrap, this.wasmHeapEl);
         return header;
     }
 
@@ -265,6 +279,15 @@ export class DebugUI {
         this.fpsEl.textContent = `FPS: ${this.fps}`;
         this.idEl.textContent = nid != null && nid !== '' ? nid : '—';
         this.lockDot.classList.toggle('debug-ui__lock-dot--on', frame.isPaused);
+
+        const h = frame.wasmHeap;
+        const used = formatBytes(h.usedBytesApprox);
+        const total = formatBytes(h.totalBytes);
+        this.wasmHeapEl.textContent = `WASM ~${used} / ${total}`;
+        this.wasmHeapEl.title =
+            `Jolt linear memory (approx): used ~${h.usedBytesApprox.toLocaleString()} B, ` +
+            `free ~${h.freeBytes.toLocaleString()} B, total ${h.totalBytes.toLocaleString()} B. ` +
+            'Free is a dlmalloc estimate; hover values are exact bytes.';
     }
 
     private updateKeyboard(kb: ControlState['debug']['keyboard']): void {
@@ -306,8 +329,10 @@ export class DebugUI {
         const ld = c.lookDirection;
         const md = c.movementDirection;
         const p = frame.playerPosition;
+        const v = frame.playerVelocity;
         this.footerEl.innerHTML = [
             `pos <span class="debug-ui__footer-accent">${fmt(p.x, 2)}, ${fmt(p.y, 2)}, ${fmt(p.z, 2)}</span>`,
+            `vel <span class="debug-ui__footer-accent">${fmt(v.x, 2)}, ${fmt(v.y, 2)}, ${fmt(v.z, 2)}</span>`,
             `look φ/θ ${fmt(d.lookPhiDeg, 1)}° / ${fmt(d.lookThetaDeg, 1)}°`,
             `look <span class="debug-ui__footer-accent">${fmt(ld.x, 2)}, ${fmt(ld.y, 2)}, ${fmt(ld.z, 2)}</span>`,
             `move <span class="debug-ui__footer-accent">${fmt(md.x, 2)}, ${fmt(md.y, 2)}, ${fmt(md.z, 2)}</span>`,

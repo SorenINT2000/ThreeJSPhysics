@@ -7,6 +7,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Renderer, CameraPresets, Camera, DebugRenderer } from './rendering';
 import { Level } from './level';
 import { DebugUI, PauseMenu } from './ui';
+import { MovingCuboid } from './movingCuboid';
 
 const FALL_THRESHOLD_Y = -10;
 
@@ -47,11 +48,20 @@ async function init() {
         new THREE.Vector3(0, 4, -10)
     );
 
+    const movingPlatform = new MovingCuboid(
+        new THREE.BoxGeometry(4, 0.2, 4),
+        new THREE.Vector3(2, 0.1, 2),
+        (positionVec: THREE.Vector3, time: number) => {
+            return positionVec.setY(10 + 3 * Math.sin(time * 2));
+        }
+    );
+
 
     // 3. Physics world (Jolt) and scene (Level)
     const level = new Level(
         new THREE.Color(0x87ceeb),
-        [floor, platform1, platform2, platform3, wall]
+        [floor, platform1, platform2, platform3, wall],
+        [movingPlatform]
     );
 
     // Snowman decoration (visual only, no physics)
@@ -102,13 +112,14 @@ async function init() {
     const controls = new Controls();
 
     const playerSpawnPosition = new THREE.Vector3(0, 5, 0);
-    const playerVelocity = new THREE.Vector3();
+    const playerSpawnVelocity = new THREE.Vector3(0, 3, 0);
 
-    const player = new Player(1, playerSpawnPosition, playerVelocity);
+    const player = new Player(1, playerSpawnPosition, playerSpawnVelocity);
     const { kinematicCharacter } = level.spawn(player);
 
     const physicsSyncs: Array<() => void> = [];
     physicsSyncs.push(() => kinematicCharacter.syncPositionTo(player.position));
+    physicsSyncs.push(() => kinematicCharacter.syncVelocityTo(player.velocity));
 
     const mainCamera: Camera = CameraPresets.thirdPersonCamera(player);
     const miniMapCamera: Camera = CameraPresets.topDownCameraFollow(player);
@@ -128,6 +139,9 @@ async function init() {
     function onPlayerDeath(): void {
         console.log("player dead");
         kinematicCharacter.setPosition(playerSpawnPosition.x, playerSpawnPosition.y, playerSpawnPosition.z);
+        kinematicCharacter.setVelocity(playerSpawnVelocity.x, playerSpawnVelocity.y, playerSpawnVelocity.z);
+        player.playerDead = false;
+        player.velocity.copy(playerSpawnVelocity);
     }
 
     function animate() {
@@ -153,6 +167,12 @@ async function init() {
                     y: player.position.y,
                     z: player.position.z,
                 },
+                playerVelocity: {
+                    x: player.velocity.x,
+                    y: player.velocity.y,
+                    z: player.velocity.z,
+                },
+                wasmHeap: level.physics.getWasmHeapStats(),
             });
         };
 
