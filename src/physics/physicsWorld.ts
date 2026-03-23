@@ -73,7 +73,7 @@ export class PhysicsWorld {
         const bodySettings = new Jolt.BodyCreationSettings(
             shape,
             new Jolt.RVec3(position.x, position.y, position.z),
-            new Jolt.Quat(0, 0, 0, 1),
+            Jolt.Quat.prototype.sIdentity(),
             Jolt.EMotionType_Static,
             LAYER_NON_MOVING
         );
@@ -81,6 +81,69 @@ export class PhysicsWorld {
         Jolt.destroy(bodySettings);
         this.bodyInterface.AddBody(body.GetID(), Jolt.EActivation_DontActivate);
     }
+
+    // createFloor(yLevel: number): void {
+    //     const plane_shape = new Jolt.PlaneShape(new Jolt.Plane(new Jolt.Vec3(0, 1, 0), 0));
+    //     // const shape_settings = new Jolt.ShapeSettings(); // Optional, or use shape directly
+    //     const body_settings = new Jolt.BodyCreationSettings(
+    //         plane_shape, 
+    //         new Jolt.RVec3(0, yLevel, 0),     // Position
+    //         Jolt.Quat.prototype.sIdentity(), // Rotation
+    //         Jolt.EMotionType_Static,    // Motion Type (Static = immovable)
+    //         LAYER_NON_MOVING            // Your defined collision layer
+    //     );
+    //     const body = this.bodyInterface.CreateBody(body_settings);
+    //     Jolt.destroy(body_settings);
+    //     this.bodyInterface.AddBody(body.GetID(), Jolt.EActivation_DontActivate)
+
+    //     // Register the player contact activation listener
+
+    //     const activationListener = new Jolt.BodyActivationListenerJS;
+    //     activationListener.OnBodyActivated = (bodyId, userData) => {
+    //         bodyId = Jolt.wrapPointer(bodyId, Jolt.BodyID);
+    //         console.log('OnBodyActivated ' + bodyId.GetIndex() + ' ' + userData);
+    //     };
+    //     activationListener.OnBodyDeactivated = (bodyId, userData) => {
+    //         bodyId = Jolt.wrapPointer(bodyId, Jolt.BodyID);
+    //         console.log('OnBodyDeactivated ' + bodyId.GetIndex() + ' ' + userData);
+    //     };
+    //     this.system.SetBodyActivationListener(activationListener);
+
+
+    //     const contactListener = new Jolt.CharacterContactListenerJS();
+    //     contactListener.OnContactValidate = (inCharacter: number, inBodyID2: number, inSubShapeID2: number) => {
+    //         body1 = Jolt.wrapPointer(body1, Jolt.Body).GetID().GetIndex();
+    //         body2 = Jolt.wrapPointer(body2, Jolt.Body).GetID().GetIndex();
+    //         collideShapeResult = Jolt.wrapPointer(collideShapeResult, Jolt.CollideShapeResult).m;
+    //         console.log('OnContactValidate ' + body1 + ' ' + body2 + ' ' + collideShapeResult.mPenetrationAxis.ToString());
+    //         return Jolt.ValidateResult_AcceptAllContactsForThisBodyPair;
+    //     };
+    //     contactListener.OnContactAdded = (body1, body2, manifold, settings) => {
+    //         body1 = Jolt.wrapPointer(body1, Jolt.Body);
+    //         body2 = Jolt.wrapPointer(body2, Jolt.Body);
+    //         manifold = Jolt.wrapPointer(manifold, Jolt.ContactManifold);
+    //         settings = Jolt.wrapPointer(settings, Jolt.ContactSettings);
+    //         console.log('OnContactAdded ' + body1.GetID().GetIndex() + ' ' + body2.GetID().GetIndex() + ' ' + manifold.mWorldSpaceNormal.ToString());
+
+    //         // Override the restitution to 0.5
+    //         settings.mCombinedRestitution = 0.5;
+    //     };
+    //     contactListener.OnContactPersisted = (body1, body2, manifold, settings) => {
+    //         body1 = Jolt.wrapPointer(body1, Jolt.Body);
+    //         body2 = Jolt.wrapPointer(body2, Jolt.Body);
+    //         manifold = Jolt.wrapPointer(manifold, Jolt.ContactManifold);
+    //         settings = Jolt.wrapPointer(settings, Jolt.ContactSettings);
+    //         console.log('OnContactPersisted ' + body1.GetID().GetIndex() + ' ' + body2.GetID().GetIndex() + ' ' + manifold.mWorldSpaceNormal.ToString());
+
+    //         // Override the restitution to 0.5
+    //         settings.mCombinedRestitution = 0.5;
+    //     };
+    //     contactListener.OnContactRemoved = (subShapePair) => {
+    //         subShapePair = Jolt.wrapPointer(subShapePair, Jolt.SubShapeIDPair);
+    //         console.log('OnContactRemoved ' + subShapePair.GetBody1ID().GetIndex() + ' ' + subShapePair.GetBody2ID().GetIndex());
+    //     };
+    //     this.system.SetContactListener(contactListener);
+    // }
 
     /**
      * Create and return a CharacterVirtual. Caller must update it each frame via

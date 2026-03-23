@@ -1,0 +1,302 @@
+.debug-ui {
+  --dbg-bg: rgba(12, 14, 20, 0.88);
+  --dbg-border: rgba(255, 255, 255, 0.12);
+  --dbg-key: rgba(40, 44, 58, 0.95);
+  --dbg-key-pressed: rgba(80, 140, 255, 0.85);
+  --dbg-key-text: rgba(230, 232, 240, 0.95);
+  --dbg-muted: rgba(160, 165, 180, 0.75);
+  --dbg-accent: rgba(120, 200, 255, 0.9);
+  font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+  font-size: 11px;
+  color: var(--dbg-key-text);
+  background: var(--dbg-bg);
+  border: 1px solid var(--dbg-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(440px, 94vw);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.debug-ui__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--dbg-border);
+  font-size: 11px;
+}
+
+.debug-ui__header strong {
+  color: var(--dbg-accent);
+  font-weight: 600;
+}
+
+.debug-ui__id-wrap {
+  color: var(--dbg-muted);
+}
+
+.debug-ui__lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--dbg-muted);
+}
+
+.debug-ui__lock-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(255, 80, 80, 0.5);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3) inset;
+}
+
+.debug-ui__lock-dot--on {
+  background: rgba(80, 220, 120, 0.95);
+  box-shadow: 0 0 8px rgba(80, 220, 120, 0.45);
+}
+
+.debug-ui__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px 18px;
+}
+
+.debug-ui__section-title {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dbg-muted);
+  margin-bottom: 6px;
+}
+
+.debug-ui__kbd {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.debug-ui__key {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--dbg-key);
+  border: 1px solid var(--dbg-border);
+  border-radius: 5px;
+  color: var(--dbg-key-text);
+  font-size: 11px;
+  font-weight: 600;
+  transition:
+    background 0.06s ease,
+    border-color 0.06s ease,
+    box-shadow 0.06s ease;
+}
+
+.debug-ui__key--pressed {
+  background: var(--dbg-key-pressed);
+  border-color: rgba(180, 210, 255, 0.5);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.15) inset,
+    0 0 12px rgba(80, 140, 255, 0.35);
+}
+
+.debug-ui__key--wide {
+  min-width: 120px;
+  height: 26px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.debug-ui__key-row {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+
+.debug-ui__gp {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  opacity: 1;
+  transition: opacity 0.15s ease;
+}
+
+.debug-ui__gp--disconnected {
+  opacity: 0.38;
+  pointer-events: none;
+}
+
+.debug-ui__gp-id {
+  font-size: 9px;
+  color: var(--dbg-muted);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-ui__sticks {
+  display: flex;
+  gap: 12px;
+}
+
+.debug-ui__stick-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.debug-ui__stick-label {
+  font-size: 9px;
+  color: var(--dbg-muted);
+  letter-spacing: 0.06em;
+}
+
+.debug-ui__stick-ring {
+  position: relative;
+  overflow: visible;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(30, 34, 48, 0.9) 0%,
+    rgba(18, 20, 28, 0.95) 100%
+  );
+  border: 1px solid var(--dbg-border);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.debug-ui__stick-ring::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  margin-left: -0.5px;
+  background: rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+}
+
+.debug-ui__stick-ring::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  margin-top: -0.5px;
+  background: rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+}
+
+.debug-ui__stick-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, rgba(200, 220, 255, 0.95), rgba(100, 150, 255, 0.9));
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.debug-ui__gp-buttons {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.debug-ui__dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 28px);
+  grid-template-rows: repeat(3, 28px);
+  gap: 3px;
+}
+
+.debug-ui__dpad-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.debug-ui__padbtn {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--dbg-key);
+  border: 1px solid var(--dbg-border);
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--dbg-key-text);
+  transition:
+    background 0.06s ease,
+    border-color 0.06s ease,
+    box-shadow 0.06s ease;
+}
+
+.debug-ui__padbtn--pressed {
+  background: var(--dbg-key-pressed);
+  border-color: rgba(180, 210, 255, 0.5);
+  box-shadow: 0 0 10px rgba(80, 140, 255, 0.3);
+}
+
+.debug-ui__face {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.debug-ui__face-a {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+  background: rgba(50, 55, 70, 0.95);
+  border: 1px solid var(--dbg-border);
+  color: rgba(200, 210, 230, 0.95);
+  transition:
+    background 0.06s ease,
+    box-shadow 0.06s ease;
+}
+
+.debug-ui__face-a--pressed {
+  background: rgba(90, 200, 120, 0.75);
+  border-color: rgba(160, 240, 180, 0.5);
+  box-shadow: 0 0 14px rgba(90, 200, 120, 0.35);
+  color: #0a120c;
+}
+
+.debug-ui__footer {
+  font-size: 9px;
+  color: var(--dbg-muted);
+  line-height: 1.4;
+  padding-top: 4px;
+  border-top: 1px solid var(--dbg-border);
+}
+
+.debug-ui__footer-accent {
+  color: var(--dbg-accent);
+}

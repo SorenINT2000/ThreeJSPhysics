@@ -20,6 +20,9 @@ export class KinematicCharacter {
     private jumpVelocity: number;
     private verticalVelocity = 0;
 
+    /** Reused so `update` does not allocate a THREE.Vector3 per frame. */
+    private readonly horizontalMove = new THREE.Vector3();
+
     // Jolt objects reused every frame — created once
     private readonly zeroGravity: typeof Jolt.Vec3.prototype;
     private readonly updateSettings: typeof Jolt.ExtendedUpdateSettings.prototype;
@@ -43,6 +46,8 @@ export class KinematicCharacter {
         this.updateSettings.mWalkStairsStepUp = new Jolt.Vec3(0, 0.4, 0);
         this.bodyFilter = new Jolt.BodyFilter();
         this.shapeFilter = new Jolt.ShapeFilter();
+
+        this.character.SetUserData(1234567890);
     }
 
     /**
@@ -52,7 +57,12 @@ export class KinematicCharacter {
      * @param jumpPressed True if jump key is pressed this frame.
      */
     update(deltaTime: number, moveDir: THREE.Vector3, jumpPressed: boolean): void {
-        const horizontal = moveDir.clone().normalize().multiplyScalar(this.moveSpeed);
+        const horizontal = this.horizontalMove.copy(moveDir);
+        if (horizontal.lengthSq() > 1e-10) {
+            horizontal.normalize().multiplyScalar(this.moveSpeed);
+        } else {
+            horizontal.set(0, 0, 0);
+        }
 
         const isGrounded = this.character.GetGroundState() === Jolt.EGroundState_OnGround;
         if (isGrounded) {
@@ -84,5 +94,9 @@ export class KinematicCharacter {
     syncPositionTo(target: THREE.Vector3): void {
         const pos = this.character.GetPosition();
         target.set(pos.GetX(), pos.GetY(), pos.GetZ());
+    }
+
+    setPosition(x: number, y: number, z: number): void {
+        this.character.SetPosition(new Jolt.RVec3(x, y, z));
     }
 }

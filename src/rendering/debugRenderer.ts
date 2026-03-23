@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
-import { Jolt } from './jolt';
+import { Jolt } from '../physics';
 
 type JoltVec3 = { GetX: () => number; GetY: () => number; GetZ: () => number };
 
@@ -14,13 +14,11 @@ const textDecoder = new TextDecoder();
  * Requires the debug build of jolt-physics (DebugRendererJS).
  */
 export class DebugRenderer {
-    private scene: THREE.Scene;
-    private camera: THREE.Camera;
-    private webglRenderer: THREE.WebGLRenderer;
-    private physicsSystem: unknown;
+    private debugScene: THREE.Scene;
+    private physicsSystem: typeof Jolt.PhysicsSystem.prototype;
     private debugGroup: THREE.Group;
 
-    private materialCache: Record<string, THREE.MeshPhongMaterial> = {};
+    private materialCache: Record<string, THREE.MeshStandardMaterial> = {};
     private lineCache: Record<number, THREE.Vector3[]> = {};
     private lineMesh: Record<number, THREE.LineSegments> = {};
     private triangleCache: Record<number, THREE.Vector3[]> = {};
@@ -43,18 +41,13 @@ export class DebugRenderer {
 
     private bodyDrawSettings: unknown;
 
-    constructor(
-        scene: THREE.Scene,
-        camera: THREE.Camera,
-        webglRenderer: THREE.WebGLRenderer,
-        physicsSystem: unknown
-    ) {
-        this.scene = scene;
-        this.camera = camera;
-        this.webglRenderer = webglRenderer;
+    constructor(physicsSystem: typeof Jolt.PhysicsSystem.prototype) {
         this.physicsSystem = physicsSystem;
+
         this.debugGroup = new THREE.Group();
-        this.scene.add(this.debugGroup);
+        this.debugScene = new THREE.Scene()
+        this.debugScene.add(this.debugGroup);
+        this.debugScene.add(new THREE.AmbientLight(0xffffff, 10));
 
         const j = Jolt as unknown as { DebugRendererJS: new () => Record<string, unknown>; BodyManagerDrawSettings: new () => unknown };
         this.joltRenderer = new j.DebugRendererJS();
@@ -69,10 +62,6 @@ export class DebugRenderer {
         this.bodyDrawSettings = new j.BodyManagerDrawSettings();
         (this.bodyDrawSettings as Record<string, boolean>).mDrawShape = true;
         (this.bodyDrawSettings as Record<string, boolean>).mDrawShapeWireframe = true;
-    }
-
-    setVisible(visible: boolean): void {
-        this.debugGroup.visible = visible;
     }
 
     Initialize(): void {
@@ -212,10 +201,10 @@ export class DebugRenderer {
         return batchID;
     }
 
-    private getMeshMaterial(color: number, cullMode: number | undefined, drawMode: number): THREE.MeshPhongMaterial {
+    private getMeshMaterial(color: number, cullMode: number | undefined, drawMode: number): THREE.MeshStandardMaterial {
         const key = `${color}|${cullMode}|${drawMode}`;
         if (!this.materialCache[key]) {
-            const material = new THREE.MeshPhongMaterial({ color });
+            const material = new THREE.MeshStandardMaterial({ color, depthTest: false });
             const JoltEnums = Jolt as unknown as {
                 EDrawMode_Wireframe: number;
                 ECullMode_Off: number;
@@ -243,7 +232,7 @@ export class DebugRenderer {
         return this.materialCache[key];
     }
 
-    Render(): void {
+    Render(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
         const allMeshes = [
             ...Object.values(this.lineMesh),
             ...Object.values(this.triangleMesh),
@@ -253,13 +242,14 @@ export class DebugRenderer {
         allMeshes.forEach((mesh) => (mesh.visible = false));
 
         for (const [colorU32, points] of Object.entries(this.lineCache)) {
+            
             const color = parseInt(colorU32, 10);
             if (this.lineMesh[color]) {
                 this.lineMesh[color].geometry.dispose();
                 this.lineMesh[color].geometry = new THREE.BufferGeometry().setFromPoints(points);
                 this.lineMesh[color].visible = true;
             } else {
-                const material = new THREE.LineBasicMaterial({ color });
+                const material = new THREE.LineBasicMaterial({ color, depthTest: false });
                 const geometry = new THREE.BufferGeometry().setFromPoints(points);
                 const mesh = new THREE.LineSegments(geometry, material);
                 this.lineMesh[color] = mesh;
@@ -303,7 +293,7 @@ export class DebugRenderer {
             if (!this.css3dRender) {
                 this.css3dRender = new CSS3DRenderer();
                 const renderSize = new THREE.Vector2();
-                this.webglRenderer.getSize(renderSize);
+                renderer.getSize(renderSize);
                 this.css3dRender.setSize(renderSize.x, renderSize.y);
                 const element = this.css3dRender.domElement;
                 element.style.position = 'absolute';
@@ -311,7 +301,7 @@ export class DebugRenderer {
                 const container = document.getElementById('container');
                 (container ?? document.body).appendChild(element);
                 window.addEventListener('resize', () => {
-                    this.webglRenderer.getSize(renderSize);
+                    renderer.getSize(renderSize);
                     this.css3dRender!.setSize(renderSize.x, renderSize.y);
                 }, { once: false });
             }
@@ -324,14 +314,20 @@ export class DebugRenderer {
             } else {
                 ((mesh as unknown as { element: HTMLElement }).element as HTMLDivElement).innerText = text;
                 ((mesh as unknown as { element: HTMLElement }).element as HTMLDivElement).style.color =
-                    '#' + ('000000' + color.toString(16)).slice(-6);
+                    '#' + ('FFFFFF' + color.toString(16)).slice(-6);
             }
             mesh.position.copy(position);
             mesh.visible = true;
         });
 
+        const oldAutoClear = renderer.autoClear;
+        
+        renderer.autoClear = false;
+        renderer.render(this.debugScene, camera);
+        renderer.autoClear = oldAutoClear;
+
         if (this.css3dRender) {
-            this.css3dRender.render(this.scene, this.camera);
+            this.css3dRender.render(this.debugScene, camera);
         }
 
         this.geometryList = [];
@@ -343,9 +339,9 @@ export class DebugRenderer {
     /**
      * Draw physics bodies and flush to Three.js. Call each frame when debug is enabled.
      */
-    render(): void {
+    render(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
         this.Initialize();
         this.DrawBodies(this.physicsSystem, this.bodyDrawSettings);
-        this.Render();
+        this.Render(renderer, camera);
     }
 }

@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 import { Player } from './player';
-import * as Cameras from './camera';
-import { MouseState, KeyboardState } from './input';
+import { Controls } from './controls';
 import { NetworkManager } from './network';
-import { PauseMenu } from './pauseMenu';
 import { EnvironmentObject } from './environmentObject';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { ConfigurableRenderer } from './renderer';
+import { Renderer, CameraPresets, Camera, DebugRenderer } from './rendering';
 import { Level } from './level';
-import { DebugRenderer } from './debugRenderer';
+import { DebugUI, PauseMenu } from './ui';
+
+const FALL_THRESHOLD_Y = -10;
 
 async function init() {
     const clock = new THREE.Clock();
@@ -47,6 +47,7 @@ async function init() {
         new THREE.Vector3(0, 4, -10)
     );
 
+
     // 3. Physics world (Jolt) and scene (Level)
     const level = new Level(
         new THREE.Color(0x87ceeb),
@@ -67,49 +68,55 @@ async function init() {
     const network = networking ? new NetworkManager() : null;
     network?.setScene(level);
 
-    const pauseMenu = new PauseMenu((_paused) => {});
+    let isPaused = false;
+    /** Ignore Escape toggle briefly after browser-driven pointer unlock (same event as pause). */
+    let suppressPauseToggleFromEscapeMs = 0;
+    let pointerWasLocked = document.pointerLockElement === document.body;
 
-    const uiContainer = document.createElement('div');
-    Object.assign(uiContainer.style, {
-        position: 'fixed', top: '10px', left: '10px',
-        color: 'white', backgroundColor: 'rgba(0,0,0,0.5)',
-        padding: '5px 10px', fontFamily: 'monospace', fontSize: '14px',
-        borderRadius: '4px', pointerEvents: 'none', zIndex: '1000'
+    function setPaused(next: boolean) {
+        if (next === isPaused) return;
+        isPaused = next;
+        pauseMenu.setVisible(next);
+        if (next) {
+            document.exitPointerLock();
+        } else {
+            document.body.requestPointerLock();
+        }
+    }
+
+    const pauseMenu = new PauseMenu(() => setPaused(false));
+
+    document.addEventListener('pointerlockchange', () => {
+        const locked = document.pointerLockElement === document.body;
+        if (pointerWasLocked && !locked) {
+            if (!isPaused) {
+                setPaused(true);
+            }
+            suppressPauseToggleFromEscapeMs = performance.now() + 150;
+        }
+        pointerWasLocked = locked;
     });
-    document.body.appendChild(uiContainer);
 
-    const mouseLook = new MouseState();
+    const debugUI = new DebugUI();
 
-    const initialPlayerPosition = new THREE.Vector3(0, 5, 0);
+    const controls = new Controls();
+
+    const playerSpawnPosition = new THREE.Vector3(0, 5, 0);
     const playerVelocity = new THREE.Vector3();
 
-    const player = new Player(1, initialPlayerPosition, playerVelocity, mouseLook);
-    const { kinematicCharacter } = level.addPlayer(player);
+    const player = new Player(1, playerSpawnPosition, playerVelocity);
+    const { kinematicCharacter } = level.spawn(player);
 
     const physicsSyncs: Array<() => void> = [];
     physicsSyncs.push(() => kinematicCharacter.syncPositionTo(player.position));
 
-    const mainCamera = Cameras.thirdPersonCamera(player);
-    const miniMapCamera = Cameras.topDownCameraFollow(player);
+    const mainCamera: Camera = CameraPresets.thirdPersonCamera(player);
+    const miniMapCamera: Camera = CameraPresets.topDownCameraFollow(player);
 
-    const mainRenderer = new ConfigurableRenderer(level, mainCamera.camera, true);
-    const miniMapRenderer = new ConfigurableRenderer(level, miniMapCamera.camera, false, 200, 200);
 
-    const debugRenderer = new DebugRenderer(
-        level,
-        mainCamera.camera,
-        mainRenderer.renderer,
-        level.physics.system
-    );
-    let debugEnabled = false;
-    debugRenderer.setVisible(false);
-    window.addEventListener('keydown', (e) => {
-        if (e.code === 'F3') {
-            e.preventDefault();
-            debugEnabled = !debugEnabled;
-            debugRenderer.setVisible(debugEnabled);
-        }
-    });
+    const debugRenderer = new DebugRenderer(level.physicsWorld.system)
+    const mainRenderer = new Renderer(level, mainCamera, debugRenderer, true);
+    const miniMapRenderer = new Renderer(level, miniMapCamera, debugRenderer, false, 200, 200);
 
     Object.assign(miniMapRenderer.renderer.domElement.style, {
         position: 'fixed', top: '10px', right: '10px',
@@ -118,27 +125,58 @@ async function init() {
         pointerEvents: 'none',
     });
 
-    const keys = new KeyboardState(["KeyW", "KeyA", "KeyS", "KeyD", "Space"]);
-
-    let lastTime = performance.now();
-    let frames = 0;
+    function onPlayerDeath(): void {
+        console.log("player dead");
+        kinematicCharacter.setPosition(playerSpawnPosition.x, playerSpawnPosition.y, playerSpawnPosition.z);
+    }
 
     function animate() {
         requestAnimationFrame(animate);
-        if (pauseMenu.getPaused()) return;
 
         const deltaTime = Math.min(clock.getDelta(), 1 / 30);
+        const controlState = controls.getState(deltaTime);
 
-        player.updateLookFromState(mouseLook.lookState);
+        if (
+            controlState.togglePausePressed &&
+            performance.now() > suppressPauseToggleFromEscapeMs
+        ) {
+            setPaused(!isPaused);
+        }
 
-        const moveDir = new THREE.Vector3();
-        if (keys.state.KeyW) moveDir.addScaledVector(player.forwardDirection, 1);
-        if (keys.state.KeyS) moveDir.addScaledVector(player.forwardDirection, -1);
-        if (keys.state.KeyA) moveDir.addScaledVector(player.rightDirection, -1);
-        if (keys.state.KeyD) moveDir.addScaledVector(player.rightDirection, 1);
+        const flushDebugHud = () => {
+            debugUI.update({
+                networkId: network?.getLocalId() ?? null,
+                control: controlState,
+                isPaused,
+                playerPosition: {
+                    x: player.position.x,
+                    y: player.position.y,
+                    z: player.position.z,
+                },
+            });
+        };
 
-        kinematicCharacter.update(deltaTime, moveDir, !!keys.state['Space']);
+        if (isPaused) {
+            flushDebugHud();
+            return;
+        }
+
+        const { lookDirection, movementDirection, isJumping } = controlState;
+
+        player.updateLookFromDirection(lookDirection);
+        kinematicCharacter.update(deltaTime, movementDirection, isJumping);
+
         physicsSyncs.forEach(sync => sync());
+
+        // Kill the player if below the fall threshold
+        if (player.position.y < FALL_THRESHOLD_Y) {
+            if (!player.playerDead) {
+                player.playerDead = true;
+                onPlayerDeath();  // your event: respawn, play sound, etc.
+            }
+        } else {
+            player.playerDead = false;  // reset when above again (e.g. after respawn)
+        }
 
         player.updateVisuals();
 
@@ -147,19 +185,11 @@ async function init() {
 
         mainCamera.update();
         miniMapCamera.update();
-        if (debugEnabled) {
-            debugRenderer.render();
-        }
+        
         miniMapRenderer.render();
         mainRenderer.render();
 
-        const time = performance.now();
-        frames++;
-        if (time > lastTime + 1000) {
-            uiContainer.innerHTML = `FPS: ${Math.round((frames * 1000) / (time - lastTime))}<br>ID: ${network?.getLocalId()}`;
-            lastTime = time;
-            frames = 0;
-        }
+        flushDebugHud();
     }
 
     animate();

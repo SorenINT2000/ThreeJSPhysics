@@ -1,14 +1,12 @@
 import * as THREE from 'three';
-import { PhysicsWorld } from './physicsWorld';
+import { PhysicsWorld, KinematicCharacter } from './physics';
 import { EnvironmentObject } from './environmentObject';
 import { Player } from './player';
 import { LightSource } from './lighting';
-import { KinematicCharacter } from './kinematicCharacter';
 
 class Level extends THREE.Scene {
-    private physicsWorld: PhysicsWorld;
+    public physicsWorld: PhysicsWorld;
     private environmentObjects: Array<EnvironmentObject>;
-    private playerCharacter: any = null; // Track the character for debug drawing
 
     constructor(
         background: THREE.Color | THREE.Texture | THREE.CubeTexture | null,
@@ -29,6 +27,8 @@ class Level extends THREE.Scene {
             super.add(obj);
             this.physicsWorld.createStaticBody(obj.halfExtents, obj.position);
         });
+
+        this.addFloor(-15);
     }
 
     /** Dynamically add a static physics object to the scene at runtime. */
@@ -38,11 +38,20 @@ class Level extends THREE.Scene {
         this.physicsWorld.createStaticBody(object.halfExtents, object.position);
     }
 
+    public addFloor(yLevel: number): void {
+        const floorGeom = new THREE.PlaneGeometry(500, 500, 1, 1).rotateX(-Math.PI / 2);
+        const material = new THREE.MeshPhysicalMaterial({ color: 0xC7C7C7 });
+        const floorObject = new THREE.Mesh(floorGeom, material)
+        super.add(floorObject)
+        floorObject.position.setY(yLevel);
+        // this.physicsWorld.createFloor(yLevel);
+    }
+
     /**
      * Add the local player to the scene and return a KinematicCharacter.
      * Update it each frame via kinematicCharacter.update(dt, moveDir, jumpPressed).
      */
-    public addPlayer(player: Player): { kinematicCharacter: KinematicCharacter } {
+    public spawn(player: Player): { kinematicCharacter: KinematicCharacter } {
         super.add(player);
         const character = this.physicsWorld.createCharacter(player.halfExtents, player.position);
         const kinematicCharacter = new KinematicCharacter(this.physicsWorld, character);
