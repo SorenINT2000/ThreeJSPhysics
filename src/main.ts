@@ -116,6 +116,7 @@ async function init() {
 
     const player = new Player(1, playerSpawnPosition, playerSpawnVelocity);
     const { kinematicCharacter } = level.spawn(player);
+    network?.setPhysics(level.physics, player.halfExtents);
 
     const physicsSyncs: Array<() => void> = [];
     physicsSyncs.push(() => kinematicCharacter.syncPositionTo(player.position));
@@ -176,48 +177,45 @@ async function init() {
             });
         };
 
-        if (isPaused) {
-            flushDebugHud();
-            return;
-        }
-
-        const { lookDirection, movementDirection, isJumping } = controlState;
-
-        player.updateLookFromDirection(lookDirection);
-        const roomSimTime = network?.getRoomSimulationTime();
-        let authoritativeSimTime: number | undefined;
-        if (network?.getIsReady() && !network.getIsHost() && roomSimTime !== undefined) {
-            authoritativeSimTime = roomSimTime;
-        }
-        kinematicCharacter.update(deltaTime, movementDirection, isJumping, authoritativeSimTime);
-
-        physicsSyncs.forEach(sync => sync());
-
-        // Kill the player if below the fall threshold
-        if (player.position.y < FALL_THRESHOLD_Y) {
-            if (!player.playerDead) {
-                player.playerDead = true;
-                onPlayerDeath();  // your event: respawn, play sound, etc.
-            }
-        } else {
-            player.playerDead = false;  // reset when above again (e.g. after respawn)
-        }
-
-        player.updateVisuals();
-
+        network?.updateRemotePlayers(deltaTime);
         network?.sendState(
             player.position,
             player.rotation.y,
             network?.getIsHost() ? level.physics.getSimulationTime() : undefined
         );
-        network?.updateRemotePlayers();
+
+        if (!isPaused) {
+            const { lookDirection, movementDirection, isJumping } = controlState;
+            player.updateLookFromDirection(lookDirection);
+            const roomSimTime = network?.getRoomSimulationTime();
+            let authoritativeSimTime: number | undefined;
+            if (network?.getIsReady() && !network.getIsHost() && roomSimTime !== undefined) {
+                authoritativeSimTime = roomSimTime;
+            }
+            kinematicCharacter.update(deltaTime, movementDirection, isJumping, authoritativeSimTime);
+            physicsSyncs.forEach(sync => sync());
+
+            if (player.position.y < FALL_THRESHOLD_Y) {
+                if (!player.playerDead) {
+                    player.playerDead = true;
+                    onPlayerDeath();
+                }
+            } else {
+                player.playerDead = false;
+            }
+            player.updateVisuals();
+        } else {
+            const platformTime =
+                network?.getIsReady() && !network.getIsHost()
+                    ? (network.getRoomSimulationTime() ?? level.physics.getSimulationTime() + deltaTime)
+                    : level.physics.getSimulationTime() + deltaTime;
+            level.physics.updateMovingPlatforms(platformTime, deltaTime);
+        }
 
         mainCamera.update();
         miniMapCamera.update();
-        
         miniMapRenderer.render();
         mainRenderer.render();
-
         flushDebugHud();
     }
 

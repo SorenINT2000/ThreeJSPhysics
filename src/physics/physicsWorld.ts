@@ -34,6 +34,9 @@ export class PhysicsWorld {
     /** Per-frame kinematic sync; each entry owns a long-lived `RVec3` (no per-frame alloc). */
     private positionUpdaters: Array<(dt: number) => void> = [];
 
+    /** Remote player collision proxies: kinematic bodies the local CharacterVirtual collides with. */
+    private playerProxies: Map<string, { bodyID: InstanceType<JoltModule['BodyID']>; joltPos: InstanceType<JoltModule['RVec3']> }> = new Map();
+
     constructor() {
         // Which object layers can collide with each other
         this.objectFilter = new Jolt.ObjectLayerPairFilterTable(NUM_OBJECT_LAYERS);
@@ -100,6 +103,51 @@ export class PhysicsWorld {
         this.bodyInterface.AddBody(body.GetID(), Jolt.EActivation_DontActivate);
     }
 
+    /**
+     * Create a kinematic proxy for a remote player. The local CharacterVirtual will collide with it.
+     * Idempotent — no-op if proxy for this ID already exists.
+     */
+    createPlayerProxy(playerId: string, halfExtents: THREE.Vector3, position: THREE.Vector3): void {
+        if (this.playerProxies.has(playerId)) return;
+        const { x, y, z } = halfExtents;
+        const shape = new Jolt.BoxShape(new Jolt.Vec3(x, y, z), 0.02);
+        const bodySettings = new Jolt.BodyCreationSettings(
+            shape,
+            new Jolt.RVec3(position.x, position.y, position.z),
+            Jolt.Quat.prototype.sIdentity(),
+            Jolt.EMotionType_Kinematic,
+            LAYER_MOVING
+        );
+        const body = this.bodyInterface.CreateBody(bodySettings);
+        Jolt.destroy(bodySettings);
+        const bodyID = body.GetID();
+        const joltPos = new Jolt.RVec3();
+        this.playerProxies.set(playerId, { bodyID, joltPos });
+        this.bodyInterface.AddBody(bodyID, Jolt.EActivation_Activate);
+    }
+
+    /**
+     * Update a player proxy position from network state. No-op if proxy does not exist.
+     */
+    updatePlayerProxy(playerId: string, position: THREE.Vector3, dt: number): void {
+        const entry = this.playerProxies.get(playerId);
+        if (!entry) return;
+        entry.joltPos.Set(position.x, position.y, position.z);
+        this.bodyInterface.MoveKinematic(entry.bodyID, entry.joltPos, this.identityQuat, dt);
+    }
+
+    /**
+     * Remove a player proxy and free its Jolt allocations. No-op if proxy does not exist.
+     */
+    destroyPlayerProxy(playerId: string): void {
+        const entry = this.playerProxies.get(playerId);
+        if (!entry) return;
+        this.bodyInterface.RemoveBody(entry.bodyID);
+        this.bodyInterface.DestroyBody(entry.bodyID);
+        Jolt.destroy(entry.joltPos);
+        this.playerProxies.delete(playerId);
+    }
+
     createKinematicCuboid(
         halfExtents: THREE.Vector3,
         positionFn: (time: number) => THREE.Vector3
@@ -161,6 +209,16 @@ export class PhysicsWorld {
     /** Simulation clock used by kinematic movers (`positionFn(time)`). Host advances locally; clients override via `step(..., authoritativeTime)`. */
     getSimulationTime(): number {
         return this.currentTime;
+    }
+
+    /**
+     * Update moving platform positions (visual + Jolt bodies) without stepping physics.
+     * Use when paused so clients see platforms advance from host simTime, and host sees local time advance.
+     */
+    updateMovingPlatforms(simulationTime: number, dt: number): void {
+        this.currentTime = simulationTime;
+        const clampedDt = Math.min(dt, 1 / 30);
+        this.positionUpdaters.forEach((updater) => updater(clampedDt));
     }
 
     /**

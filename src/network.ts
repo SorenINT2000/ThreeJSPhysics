@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { PhysicsWorld } from './physics';
 import {
     insertCoin,
     myPlayer,
@@ -32,6 +33,8 @@ export class NetworkManager {
     // Visual tracking
     private remoteVisuals: Map<string, THREE.Mesh> = new Map();
     private scene: THREE.Scene | null = null;
+    private physics: PhysicsWorld | null = null;
+    private playerHalfExtents: THREE.Vector3 | null = null;
     private remoteMaterial = new THREE.MeshStandardMaterial({ color: 0x4444ff });
     private remoteGeometry = new THREE.BoxGeometry(1, 1, 1);
 
@@ -41,6 +44,12 @@ export class NetworkManager {
 
     public setScene(scene: THREE.Scene) {
         this.scene = scene;
+    }
+
+    /** Enable player–player collision: creates kinematic proxy bodies for remote players. */
+    public setPhysics(physics: PhysicsWorld, playerHalfExtents: THREE.Vector3) {
+        this.physics = physics;
+        this.playerHalfExtents = playerHalfExtents.clone();
     }
 
     private async init() {
@@ -81,6 +90,7 @@ export class NetworkManager {
                 this.scene.remove(mesh);
             }
             this.remoteVisuals.delete(player.id);
+            this.physics?.destroyPlayerProxy(player.id);
             this.knownIds.delete(player.id);
             this.players = this.players.filter(p => p.id !== player.id);
         });
@@ -105,6 +115,7 @@ export class NetworkManager {
                 const mesh = this.remoteVisuals.get(p.id);
                 if (mesh && this.scene) this.scene.remove(mesh);
                 this.remoteVisuals.delete(p.id);
+                this.physics?.destroyPlayerProxy(p.id);
                 this.knownIds.delete(p.id);
                 return false;
             }
@@ -137,10 +148,11 @@ export class NetworkManager {
     }
 
     /**
-     * Updated to handle visual updates internally.
-     * This avoids garbage collection pressure from creating Maps/Objects every frame.
+     * Updated to handle visual updates and physics proxies internally.
+     * Call before kinematicCharacter.update so proxies are in place for collision.
+     * @param deltaTime Used for MoveKinematic when physics proxies are enabled.
      */
-    public updateRemotePlayers() {
+    public updateRemotePlayers(deltaTime: number) {
         if (!this.isReady || !this.scene) return;
 
         const now = performance.now();
@@ -150,7 +162,8 @@ export class NetworkManager {
         }
 
         const me = myPlayer();
-        
+        const dt = Math.min(deltaTime, 1 / 30);
+
         for (const playerState of this.players) {
             if (playerState.id === me?.id) continue;
 
@@ -159,17 +172,22 @@ export class NetworkManager {
 
             if (pos && typeof pos.x === 'number') {
                 let mesh = this.remoteVisuals.get(playerState.id);
-                
-                // Lazy create the mesh if it doesn't exist
+
                 if (!mesh) {
                     mesh = new THREE.Mesh(this.remoteGeometry, this.remoteMaterial);
                     this.scene.add(mesh);
                     this.remoteVisuals.set(playerState.id, mesh);
+                    if (this.physics && this.playerHalfExtents) {
+                        this.physics.createPlayerProxy(playerState.id, this.playerHalfExtents, pos);
+                    }
                 }
 
-                // Update existing mesh properties (zero allocation)
                 mesh.position.set(pos.x, pos.y, pos.z);
                 mesh.rotation.y = rot || 0;
+
+                if (this.physics) {
+                    this.physics.updatePlayerProxy(playerState.id, pos, dt);
+                }
             }
         }
     }
